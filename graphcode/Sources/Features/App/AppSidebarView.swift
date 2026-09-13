@@ -90,6 +90,10 @@ struct AppSidebarView: View {
       // Errors used to render only on the Welcome screen, which no longer shows once the
       // sidebar exists — so a failed Add Folder looked like nothing happening at all.
       .safeAreaInset(edge: .bottom) { bottomInset }
+      // A source build running beside the installed release is otherwise identical to
+      // it: same icon, same dark window, same sidebar. The bundle prefix is the one
+      // thing `make dev-*` changes, so it drives a badge that is always on screen.
+      .safeAreaInset(edge: .top) { DevBuildBadge() }
       // The sidebar is the system's translucent material — Liquid Glass on macOS 26,
       // the classic sidebar material on 15, both automatic for a `.listStyle(.sidebar)`
       // list in a split view. This replaced a painted recess (a gradient + hairline
@@ -514,6 +518,37 @@ extension AppSidebarView {
               .map(\.id))))
     } label: {
       Label("Add Codespace…", systemImage: "cloud")
+    }
+  }
+}
+
+/// An always-visible mark on a non-release build. Reads the bundle identifier rather
+/// than a compile-time flag so the same binary says nothing when it ships as the
+/// release and shouts when it was built with `make dev-run-app`.
+struct DevBuildBadge: View {
+  private static let releasePrefix = "dev.graphcode."
+  private var isDevBuild: Bool {
+    !(Bundle.main.bundleIdentifier ?? "").hasPrefix(Self.releasePrefix)
+  }
+  private var label: String {
+    let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+    return name ?? "Local build"
+  }
+  var body: some View {
+    if isDevBuild {
+      HStack(spacing: 6) {
+        Image(systemName: "hammer.fill").font(.caption2)
+        Text(label).font(.caption.weight(.semibold))
+        Spacer(minLength: 0)
+      }
+      .foregroundStyle(.black)
+      .padding(.horizontal, 10)
+      .padding(.vertical, 6)
+      .frame(maxWidth: .infinity)
+      .background(Color.orange, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+      .padding(.horizontal, 8)
+      .padding(.top, 6)
+      .accessibilityLabel("Development build: \(label)")
     }
   }
 }
