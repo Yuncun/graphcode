@@ -602,3 +602,16 @@ signing-doctor:
 clean:
 	rm -rf $(WORKSPACE) graphcode.xcodeproj
 	rm -rf ~/Library/Developer/Xcode/DerivedData/graphcode-*
+
+## Web canvas (web/): see web/README.md
+web-install:
+	cd web && mise exec -- pnpm install
+
+web-dev:
+	cd web && mise exec -- pnpm dev
+
+web-serve:
+	cd web && mise exec -- pnpm serve
+
+web-test:
+	cd web && mise exec -- pnpm test
