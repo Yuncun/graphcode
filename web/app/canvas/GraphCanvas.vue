@@ -25,7 +25,8 @@ let canvas: LGraphCanvas | null = null;
  * view, so two shows of the same project cannot race into building two graphs for it.
  */
 const views = new Map<string, Promise<ProjectView>>();
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
+/** The pending debounced save for each project, so a move in one cannot cancel another's. */
+const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 /** Counts show() calls, so a slow one cannot put its project back on screen after a newer one. */
 let shows = 0;
 
@@ -48,11 +49,21 @@ async function show(graph: LoopGraph): Promise<void> {
 }
 
 function scheduleSave(project: string): void {
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
+  const pending = saveTimers.get(project);
+  if (pending) clearTimeout(pending);
+  saveTimers.set(project, setTimeout(() => {
+    saveTimers.delete(project);
     void save(project);
-  }, SAVE_DELAY_MS);
+  }, SAVE_DELAY_MS));
+}
+
+/** Write a project's pending move now rather than leaving it to sit out the rest of its wait. */
+function flushSave(project: string): void {
+  const pending = saveTimers.get(project);
+  if (!pending) return;
+  clearTimeout(pending);
+  saveTimers.delete(project);
+  void save(project);
 }
 
 async function save(project: string): Promise<void> {
@@ -83,6 +94,7 @@ onMounted(async () => {
   // The constructor starts litegraph's render loop; stopRendering() below pairs with it.
   canvas = new LGraphCanvas(element, view.adapter.lgraph);
   canvas.allow_searchbox = false;
+  canvas.show_info = false;
   canvas.ds.offset = [...VIEW_MARGIN];
   canvas.onNodeMoved = () => scheduleSave(props.graph.project.path);
   fit();
@@ -90,7 +102,12 @@ onMounted(async () => {
   await show(props.graph);
 });
 
-watch(() => props.graph, (graph) => { void show(graph); }, { deep: true });
+watch(() => props.graph, (graph, previous) => {
+  // A deep change to the same graph reports the same object as `previous`, so this only fires
+  // when the tab really changed: save the project being left before its debounce runs out.
+  if (previous && previous.project.path !== graph.project.path) flushSave(previous.project.path);
+  void show(graph);
+}, { deep: true });
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", fit);
