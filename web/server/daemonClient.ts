@@ -5,10 +5,13 @@ import { encodeFrame, FrameDecoder } from "./framing.ts";
 export class DaemonClient {
   private socket: net.Socket | null = null;
   private readonly decoder = new FrameDecoder();
+  private readonly socketPath: string;
   private eventListeners: Array<(event: unknown) => void> = [];
   private closeListeners: Array<(error?: Error) => void> = [];
 
-  constructor(private readonly socketPath: string) {}
+  constructor(socketPath: string) {
+    this.socketPath = socketPath;
+  }
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
