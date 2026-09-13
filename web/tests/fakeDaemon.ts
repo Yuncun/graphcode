@@ -29,7 +29,13 @@ export async function startFakeDaemon(): Promise<FakeDaemon> {
     received,
     clients: () => sockets.size,
     send: (event) => { for (const s of sockets) s.write(encodeFrame(event)); },
-    close: () => new Promise((resolve) => { for (const s of sockets) s.destroy(); server.close(() => resolve()); }),
+    close: () => new Promise((resolve) => {
+      for (const s of sockets) s.destroy();
+      server.close(() => {
+        fs.rmSync(dir, { recursive: true, force: true });
+        resolve();
+      });
+    }),
   };
 }
 
