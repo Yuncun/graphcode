@@ -36,6 +36,7 @@ export class DaemonConnection {
   close(): void {
     this.stopped = true;
     if (this.ws) this.detach(this.ws);
+    this.setStatus("closed");
   }
 
   /** Strip handlers from a socket we're abandoning and close it, so its stale events can't reach us. */

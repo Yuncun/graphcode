@@ -46,4 +46,19 @@ describe("DaemonConnection reopen race", () => {
 
     expect(FakeWebSocket.instances).toHaveLength(2); // no third instance created
   });
+
+  it("reports closed on a deliberate close and does not reconnect", () => {
+    const conn = new DaemonConnection("ws://x");
+    const statuses: string[] = [];
+    conn.onStatus((s) => statuses.push(s));
+
+    conn.open();
+    FakeWebSocket.instances[0]!.onopen?.();
+    conn.close();
+
+    expect(statuses).toEqual(["connecting", "open", "closed"]);
+
+    vi.advanceTimersByTime(2100); // past the 2 s reconnect window
+    expect(FakeWebSocket.instances).toHaveLength(1); // no reconnect after a deliberate close
+  });
 });
