@@ -32,4 +32,22 @@ describe("GraphAdapter", () => {
     expect([...lgraph.getNodeById("A")!.pos]).toEqual([123, 456]);
     expect(adapter.positions().nodes.A?.pos).toEqual([123, 456]);
   });
+
+  it("keeps a stable edge id's link current: colour follows a condition change, and a retarget recreates the link", () => {
+    const lgraph = new LGraph();
+    const adapter = new GraphAdapter(lgraph);
+    const base: Omit<LoopGraph, "edges"> = { id: "G", revision: 1, project: { path: "/p", name: "p" }, nodes: [n("A"), n("B"), n("C")] };
+
+    adapter.sync({ ...base, edges: [{ id: "E0", from: "A", to: "B", kind: "handoff", condition: "always", fireCount: 0 }] }, { version: 1, nodes: {} });
+    expect(lgraph.links.size).toBe(1);
+    expect([...lgraph.links.values()][0]!.color).toBe("#cfd3d8");
+
+    adapter.sync({ ...base, edges: [{ id: "E0", from: "A", to: "B", kind: "handoff", condition: "onFailure", fireCount: 0 }] }, { version: 1, nodes: {} });
+    expect(lgraph.links.size).toBe(1);
+    expect([...lgraph.links.values()][0]!.color).toBe("#ef4444");
+
+    adapter.sync({ ...base, edges: [{ id: "E0", from: "A", to: "C", kind: "handoff", condition: "onFailure", fireCount: 0 }] }, { version: 1, nodes: {} });
+    expect(lgraph.links.size).toBe(1);
+    expect([...lgraph.links.values()][0]!.target_id).toBe("C");
+  });
 });

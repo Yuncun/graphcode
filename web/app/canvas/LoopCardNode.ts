@@ -23,6 +23,8 @@ export class LoopCardNode extends LGraphNode {
   loop: LoopNode | null = null;
   private live = "";
   private meta = "";
+  private liveCache: TruncateCache | undefined;
+  private metaCache: TruncateCache | undefined;
 
   constructor(title = "Loop") {
     super(title, "graphcode/loop");
@@ -53,18 +55,35 @@ export class LoopCardNode extends LGraphNode {
     ctx.font = "11px ui-monospace, Menlo, monospace";
     ctx.fillStyle = "#c8cbd0";
     ctx.textBaseline = "top";
-    ctx.fillText(truncate(ctx, this.live, width), pad, 12);
+    this.liveCache = cachedTruncate(this.liveCache, ctx, this.live, width);
+    ctx.fillText(this.liveCache.result, pad, 12);
     ctx.fillStyle = "#8b909a";
-    ctx.fillText(truncate(ctx, this.meta, width), pad, this.size[1] - 22);
+    this.metaCache = cachedTruncate(this.metaCache, ctx, this.meta, width);
+    ctx.fillText(this.metaCache.result, pad, this.size[1] - 22);
     ctx.restore();
   }
 }
+
+const TRUNCATE_INPUT_CAP = 200;
+
+export interface TruncateCache { text: string; width: number; result: string }
 
 function truncate(ctx: CanvasRenderingContext2D, text: string, width: number): string {
   if (ctx.measureText(text).width <= width) return text;
   let cut = text;
   while (cut.length > 1 && ctx.measureText(cut + "…").width > width) cut = cut.slice(0, -1);
   return cut + "…";
+}
+
+/**
+ * Truncates `text` to fit `width`, reusing `prev` when the (capped) text and width are unchanged.
+ * `onDrawForeground` runs every frame, and the character-by-character measurement in `truncate`
+ * is expensive on a long string, so this keeps it to one measurement pass per distinct (text, width).
+ */
+export function cachedTruncate(prev: TruncateCache | undefined, ctx: CanvasRenderingContext2D, text: string, width: number): TruncateCache {
+  const capped = text.length > TRUNCATE_INPUT_CAP ? text.slice(0, TRUNCATE_INPUT_CAP) : text;
+  if (prev && prev.text === capped && prev.width === width) return prev;
+  return { text: capped, width, result: truncate(ctx, capped, width) };
 }
 
 export function registerLoopCardNode(): void {

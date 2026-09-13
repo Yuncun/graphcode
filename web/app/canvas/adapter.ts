@@ -39,7 +39,15 @@ export class GraphAdapter {
 
     const wantedEdges = new Map(graph.edges.map((e) => [e.id, e]));
     for (const [edgeID, link] of [...this.linkByEdge]) {
-      if (!wantedEdges.has(edgeID) || !this.lgraph.links.get(link.id)) {
+      const edge = wantedEdges.get(edgeID);
+      // Stale if the edge is gone, its link was removed some other way, or the edge now
+      // points somewhere else (from/to/kind changed under the same edge id) — recreate it below.
+      const stale = !edge
+        || !this.lgraph.links.get(link.id)
+        || link.origin_id !== edge.from
+        || link.target_id !== edge.to
+        || link.origin_slot !== OUTPUT_SLOT[edge.kind];
+      if (stale) {
         if (this.lgraph.links.get(link.id)) this.lgraph.removeLink(link.id);
         this.linkByEdge.delete(edgeID);
       }
@@ -53,8 +61,13 @@ export class GraphAdapter {
       const inputIndex = to.inputs.length - 1;
       const link = from.connect(OUTPUT_SLOT[edge.kind], to, inputIndex);
       if (!link) continue;
-      link.color = conditionColor[edge.condition] ?? conditionColor.always;
       this.linkByEdge.set(edge.id, link);
+    }
+    // Colour follows the edge's condition every sync, not just at creation, so an edge whose
+    // condition changes under a stable id (no retarget) still gets repainted.
+    for (const [edgeID, link] of this.linkByEdge) {
+      const edge = wantedEdges.get(edgeID)!;
+      link.color = conditionColor[edge.condition] ?? conditionColor.always;
     }
     for (const node of this.lgraph.nodes as LoopCardNode[]) {
       for (let i = node.inputs.length - 1; i >= 0; i--) if (node.inputs[i]!.link == null) node.removeInput(i);

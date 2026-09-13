@@ -17,9 +17,9 @@ export function placeNodes(
   const taken = (x: number, y: number) => [...placed.values()].some(([px, py]) => Math.abs(px - x) < 1 && Math.abs(py - y) < 1);
   const firstFreeRow = (x: number, fromY: number) => { let y = fromY; while (taken(x, y)) y += ROW_STEP; return y; };
 
-  let progress = true;
-  while (progress) {
-    progress = false;
+  // One pass: place every not-yet-placed node whose upstream is already placed. Returns whether anything moved.
+  const cascade = (): boolean => {
+    let progress = false;
     for (const node of graph.nodes) {
       if (placed.has(node.id)) continue;
       const parent = (upstream.get(node.id) ?? []).find((id) => placed.has(id));
@@ -28,23 +28,15 @@ export function placeNodes(
       placed.set(node.id, [px + COLUMN_STEP, firstFreeRow(px + COLUMN_STEP, py)]);
       progress = true;
     }
-  }
+    return progress;
+  };
+
+  while (cascade());
   for (const node of graph.nodes) {
     if (placed.has(node.id)) continue;
     placed.set(node.id, [COLUMN_X, firstFreeRow(COLUMN_X, ROW_Y)]);
     // Children of this root now have a positioned upstream; place them in the next pass.
-    let more = true;
-    while (more) {
-      more = false;
-      for (const child of graph.nodes) {
-        if (placed.has(child.id)) continue;
-        const parent = (upstream.get(child.id) ?? []).find((id) => placed.has(id));
-        if (!parent) continue;
-        const [px, py] = placed.get(parent)!;
-        placed.set(child.id, [px + COLUMN_STEP, firstFreeRow(px + COLUMN_STEP, py)]);
-        more = true;
-      }
-    }
+    while (cascade());
   }
   return placed;
 }
