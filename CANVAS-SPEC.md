@@ -95,11 +95,10 @@ ComfyUI's stack and Eric's pixterm work; nothing in the list needs PrimeVue.
 | Route | Does |
 |---|---|
 | `GET /` and static | Serves the built web app |
-| `WS /events` | Opens one daemon socket, announces `nodesChanged`, forwards every `DaemonEvent` frame as JSON, verbatim |
-| `POST /command` | Forwards one `DaemonCommand` JSON frame to the daemon, verbatim, returns the ack |
+| `WS /ws` | One daemon socket per browser client. Browser to bridge: a `DaemonCommand` JSON per message. Bridge to browser: every `DaemonEvent` frame as JSON, verbatim. The bridge announces `nodesChanged` on connect. |
 | `GET /nodes` | The node registry as JSON (like `/object_info`) |
 | `GET /templates`, `GET /projects/recent` | Read the kit's files and the daemon's list |
-| `GET/PUT /projects/:path/canvas` | Positions, groups and notes keyed by node id |
+| `GET/PUT /api/canvas?project=<abs path>` | Positions, groups and notes keyed by node id |
 | `WS /pty/:nodeID` | Spawns `zmx attach graphcode-<nodeID>` in a pty, relays bytes both ways, resize messages |
 
 The bridge does no translation of the graph. The web app speaks the daemon's own Codable JSON, so
