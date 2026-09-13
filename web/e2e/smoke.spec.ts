@@ -7,14 +7,24 @@ const PROJECT = "/Users/ericshen/Claude/twodrive";
 
 async function nodeCountFromDaemon(): Promise<number> {
   const client = new DaemonClient(resolveSocketPath(process.env, os.homedir()));
-  await client.connect();
-  return new Promise((resolve) => {
-    client.onEvent((event) => {
-      const e = event as { graphChanged?: { _0: { project: { path: string }; nodes: unknown[] } } };
-      if (e.graphChanged?._0.project.path === PROJECT) { client.close(); resolve(e.graphChanged._0.nodes.length); }
+  try {
+    await client.connect();
+    return await new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`daemon did not answer openProject for ${PROJECT} within 10 s`));
+      }, 10_000);
+      client.onEvent((event) => {
+        const e = event as { graphChanged?: { _0: { project: { path: string }; nodes: unknown[] } } };
+        if (e.graphChanged?._0.project.path === PROJECT) {
+          clearTimeout(timer);
+          resolve(e.graphChanged._0.nodes.length);
+        }
+      });
+      client.send({ openProject: { path: PROJECT } });
     });
-    client.send({ openProject: { path: PROJECT } });
-  });
+  } finally {
+    client.close();
+  }
 }
 
 test("the canvas shows every node the daemon reports for twodrive", async ({ page }) => {
