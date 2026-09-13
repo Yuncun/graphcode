@@ -16,15 +16,36 @@ export class DaemonConnection {
 
   open(): void {
     this.stopped = false;
+    if (this.ws) this.detach(this.ws);
     this.setStatus("connecting");
     const ws = new WebSocket(this.url);
-    ws.onopen = () => this.setStatus("open");
-    ws.onmessage = (m) => { const event = JSON.parse(String(m.data)) as DaemonEvent; for (const cb of this.eventListeners) cb(event); };
-    ws.onclose = () => { this.setStatus("closed"); if (!this.stopped) setTimeout(() => this.open(), 2000); };
+    ws.onopen = () => { if (this.ws !== ws) return; this.setStatus("open"); };
+    ws.onmessage = (m) => {
+      if (this.ws !== ws) return;
+      const event = JSON.parse(String(m.data)) as DaemonEvent;
+      for (const cb of this.eventListeners) cb(event);
+    };
+    ws.onclose = () => {
+      if (this.ws !== ws) return;
+      this.setStatus("closed");
+      if (!this.stopped) setTimeout(() => this.open(), 2000);
+    };
     this.ws = ws;
   }
 
-  close(): void { this.stopped = true; this.ws?.close(); }
+  close(): void {
+    this.stopped = true;
+    if (this.ws) this.detach(this.ws);
+  }
+
+  /** Strip handlers from a socket we're abandoning and close it, so its stale events can't reach us. */
+  private detach(ws: WebSocket): void {
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onclose = null;
+    ws.close();
+    if (this.ws === ws) this.ws = null;
+  }
 
   send(command: DaemonCommand): void {
     if (this.ws?.readyState !== WebSocket.OPEN) throw new Error("not connected");
