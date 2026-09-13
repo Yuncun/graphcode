@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,7 +9,12 @@ import { startFakeDaemon, waitFor, type FakeDaemon } from "./fakeDaemon.ts";
 
 let daemon: FakeDaemon;
 let bridge: Awaited<ReturnType<typeof startBridge>>;
-afterEach(async () => { await bridge?.close(); await daemon?.close(); });
+let blocker: net.Server | undefined;
+afterEach(async () => {
+  await bridge?.close();
+  await daemon?.close();
+  if (blocker) await new Promise<void>((resolve) => blocker!.close(() => resolve()));
+});
 
 function openSocket(port: number): Promise<{ ws: WebSocket; messages: unknown[] }> {
   const ws = new WebSocket(`ws://localhost:${port}/ws`);
@@ -54,5 +60,13 @@ describe("bridge relay", () => {
     expect(await (await fetch(url)).json()).toEqual(doc);
     const bad = await fetch(`http://localhost:${bridge.port}/api/canvas?project=relative/path`);
     expect(bad.status).toBe(400);
+  });
+
+  it("rejects startBridge when the port is already in use, instead of crashing the process", async () => {
+    blocker = net.createServer();
+    const port = await new Promise<number>((resolve) => {
+      blocker!.listen(0, "127.0.0.1", () => resolve((blocker!.address() as net.AddressInfo).port));
+    });
+    await expect(startBridge({ port, socketPath: "/nonexistent/graphcoded.sock", distDir: null })).rejects.toThrow(/EADDRINUSE/);
   });
 });

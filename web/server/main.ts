@@ -48,7 +48,21 @@ export async function startBridge(options: BridgeOptions): Promise<{ port: numbe
   });
   const wss = new WebSocketServer({ server, path: "/ws" });
   attachRelay(wss, options.socketPath);
-  await new Promise<void>((resolve) => server.listen(options.port, "127.0.0.1", resolve));
+  await new Promise<void>((resolve, reject) => {
+    // ws's WebSocketServer re-emits the underlying http.Server's "error" event on
+    // itself (see ws/lib/websocket-server.js), so a bind failure such as EADDRINUSE
+    // surfaces on both emitters; without a listener on each, Node treats the second
+    // one as an unhandled "error" event and crashes the process even though the
+    // first was handled here.
+    const onListenError = (error: Error) => reject(error);
+    server.once("error", onListenError);
+    wss.once("error", onListenError);
+    server.listen(options.port, "127.0.0.1", () => {
+      server.off("error", onListenError);
+      wss.off("error", onListenError);
+      resolve();
+    });
+  });
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : options.port;
   return {
@@ -64,5 +78,8 @@ if (isMain) {
   const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "dist");
   startBridge({ port, socketPath, distDir }).then((bridge) => {
     console.log(`graphcode-web: http://localhost:${bridge.port}  daemon ${socketPath}`);
+  }).catch((error: Error) => {
+    console.error(`graphcode-web: ${error.message}`);
+    process.exit(1);
   });
 }
