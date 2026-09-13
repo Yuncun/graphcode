@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { placeNodes } from "../app/canvas/placement.ts";
+import { COLUMN_X, placeNodes } from "../app/canvas/placement.ts";
 import type { LoopGraph, LoopNode } from "../app/daemon/protocol.ts";
 
 const n = (id: string): LoopNode => ({ id, title: id, loopType: "goalBased", state: { idle: {} }, createdAt: 0, pausesBeforeWritesOnly: false, pilotState: "notPiloted" });
@@ -36,5 +36,26 @@ describe("placeNodes", () => {
     expect(pos.get("A")![0]).toBe(340);
     expect(pos.get("B")![0]).toBe(640);
     expect(pos.get("C")![0]).toBe(940);
+  });
+  it("gives the same result regardless of graph.nodes order", () => {
+    // Same reproduction as above, but the daemon lists the nodes in a different order. The
+    // daemon does not promise any order, so the result must not depend on it.
+    const pos = placeNodes(g(["C", "B", "A", "L"], [["L", "A"], ["A", "B"], ["B", "C"], ["L", "B"], ["L", "C"]]), {});
+    expect(pos.get("L")![0]).toBe(40);
+    expect(pos.get("A")![0]).toBe(340);
+    expect(pos.get("B")![0]).toBe(640);
+    expect(pos.get("C")![0]).toBe(940);
+  });
+  it("terminates on a two-node cycle, placing both nodes with at most one of them in column 40", () => {
+    const pos = placeNodes(g(["A", "B"], [["A", "B"], ["B", "A"]]), {});
+    expect(pos.size).toBe(2);
+    expect(pos.has("A")).toBe(true);
+    expect(pos.has("B")).toBe(true);
+    const atColumn40 = [...pos.values()].filter(([x]) => x === COLUMN_X).length;
+    expect(atColumn40).toBeLessThanOrEqual(1);
+  });
+  it("terminates on a self-loop", () => {
+    const pos = placeNodes(g(["C"], [["C", "C"]]), {});
+    expect(pos.get("C")).toEqual([40, 40]);
   });
 });
