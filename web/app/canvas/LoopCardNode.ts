@@ -3,6 +3,7 @@ import type { EdgeCondition, EdgeKind, LoopNode, LoopStateName, LoopType } from 
 import { LOOP_TYPE_LABEL, stateName } from "../daemon/protocol.ts";
 import { ageLabel } from "./time.ts";
 import { liveLine } from "./liveLine.ts";
+import { cachedTruncate, type TruncateCache } from "./textLayout.ts";
 
 export const CARD_WIDTH = 300;
 /** Height under the slot rows for the live line and the meta row. */
@@ -136,28 +137,6 @@ export class LoopCardNode extends LGraphNode {
     ctx.fillText(this.metaCache.result, pad, this.size[1] - 20);
     ctx.restore();
   }
-}
-
-const TRUNCATE_INPUT_CAP = 200;
-
-export interface TruncateCache { text: string; width: number; result: string }
-
-function truncate(ctx: CanvasRenderingContext2D, text: string, width: number): string {
-  if (ctx.measureText(text).width <= width) return text;
-  let cut = text;
-  while (cut.length > 1 && ctx.measureText(cut + "…").width > width) cut = cut.slice(0, -1);
-  return cut + "…";
-}
-
-/**
- * Truncates `text` to fit `width`, reusing `prev` when the (capped) text and width are unchanged.
- * `onDrawForeground` runs every frame, and the character-by-character measurement in `truncate`
- * is expensive on a long string, so this keeps it to one measurement pass per distinct (text, width).
- */
-export function cachedTruncate(prev: TruncateCache | undefined, ctx: CanvasRenderingContext2D, text: string, width: number): TruncateCache {
-  const capped = text.length > TRUNCATE_INPUT_CAP ? text.slice(0, TRUNCATE_INPUT_CAP) : text;
-  if (prev && prev.text === capped && prev.width === width) return prev;
-  return { text: capped, width, result: truncate(ctx, capped, width) };
 }
 
 export function registerLoopCardNode(): void {
