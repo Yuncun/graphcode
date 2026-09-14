@@ -56,9 +56,8 @@ export class GraphAdapter {
       const from = this.lgraph.getNodeById(edge.from) as LoopCardNode | null;
       const to = this.lgraph.getNodeById(edge.to) as LoopCardNode | null;
       if (!from || !to) continue;
-      to.addInput(edge.kind, edge.kind);
-      const inputIndex = to.inputs.length - 1;
-      const link = connectAsAdapter(() => from.connect(outputSlotFor(edge.kind, edge.condition), to, inputIndex));
+      const index = to.addEdgeInput(edge.kind);
+      const link = connectAsAdapter(() => from.connect(outputSlotFor(edge.kind, edge.condition), to, index));
       if (!link) continue;
       this.linkByEdge.set(edge.id, link);
     }
@@ -73,10 +72,7 @@ export class GraphAdapter {
       const edge = wantedEdges.get(edgeID)!;
       link.color = conditionColor[edge.condition] ?? conditionColor.always;
     }
-    for (const node of this.lgraph.nodes as LoopCardNode[]) {
-      for (let i = node.inputs.length - 1; i >= 0; i--) if (node.inputs[i]!.link == null) node.removeInput(i);
-      node.fitHeight();
-    }
+    for (const node of this.lgraph.nodes as LoopCardNode[]) node.pruneInputs();
     this.lgraph.setDirtyCanvas(true, true);
   }
 

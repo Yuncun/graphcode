@@ -247,9 +247,34 @@ export class LoopCardNode extends LGraphNode {
     this.fitHeight();
   }
 
+  /** Only a draft starts; a live card asked to start is a caller's mistake and is ignored. */
   markStarting(): void {
+    if (this.cardMode !== "draft") return;
     this.cardMode = "starting";
     this.refresh();
+  }
+
+  /**
+   * An input for one more edge of `kind`. litegraph grows the card for it through setSize, and that
+   * growth is not the user's resize, so it runs under the same guard as the card's own sizing.
+   * Returns the new input's index.
+   */
+  addEdgeInput(kind: EdgeKind): number {
+    this.sizing = true;
+    try { this.addInput(kind, kind); } finally { this.sizing = false; }
+    return this.inputs.length - 1;
+  }
+
+  /** Removes one edge input (a connect that failed, or an edge that went away). */
+  removeEdgeInput(index: number): void {
+    this.sizing = true;
+    try { this.removeInput(index); } finally { this.sizing = false; }
+  }
+
+  /** Drops every input that has no link, then refits the card, so it shrinks back when edges go away. */
+  pruneInputs(): void {
+    for (let i = this.inputs.length - 1; i >= 0; i--) if (this.inputs[i]!.link == null) this.removeEdgeInput(i);
+    this.fitHeight();
   }
 
   revertToDraft(): void {

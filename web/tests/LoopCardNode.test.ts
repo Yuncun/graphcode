@@ -89,6 +89,25 @@ describe("a draft card", () => {
     expect(h.onEditField).toHaveBeenCalledWith(c, field(c, "summary"));
   });
 
+  it("adds and prunes edge inputs without counting the growth as a user resize", () => {
+    const h = host();
+    const c = card(h);
+    c.setup(goal, { type: "agent/goal", title: "", values: {} });
+    const min = c.size[1];
+    for (let i = 0; i < 7; i++) expect(c.addEdgeInput("handoff")).toBe(i);
+    expect(c.inputs).toHaveLength(7);
+    expect(c.size[1]).toBeGreaterThan(min);
+    expect(c.userResized).toBe(false);
+    expect(h.onChanged).not.toHaveBeenCalled();
+    c.removeEdgeInput(6);
+    expect(c.inputs).toHaveLength(6);
+    c.pruneInputs();
+    expect(c.inputs).toHaveLength(0);
+    expect(c.size[1]).toBe(min);
+    expect(c.userResized).toBe(false);
+    expect(h.onChanged).not.toHaveBeenCalled();
+  });
+
   it("goes to starting and back", () => {
     const c = card();
     c.setup(goal, { type: "agent/goal", title: "", values: { summary: "x" } });
@@ -100,6 +119,9 @@ describe("a draft card", () => {
     c.revertToDraft();
     expect(c.cardMode).toBe("draft");
     expect(start.buttons[0]!.enabled).toBe(true);
+    c.applyLive(live(), goal);
+    c.markStarting();
+    expect(c.cardMode).toBe("live");
   });
 
   it("keeps a height the user chose, and never shrinks below what its widgets need", () => {
