@@ -77,12 +77,14 @@ describe("GraphAdapter: the daemon's side", () => {
 
   it("applies saved positions and sizes and reports them back", () => {
     const a = make();
-    a.sync(g([n("A")], []), { ...layout(), nodes: { A: { pos: [123, 456], size: [320, 400] } } });
+    // Tall enough to clear a live goal card's minimum height: its Model and Backend widgets are
+    // now read-only fields (F3), each taller than the litegraph combo row they replaced.
+    a.sync(g([n("A")], []), { ...layout(), nodes: { A: { pos: [123, 456], size: [320, 450] } } });
     const card = a.card("A")!;
     expect([...card.pos]).toEqual([123, 456]);
-    expect([...card.size]).toEqual([320, 400]);
+    expect([...card.size]).toEqual([320, 450]);
     expect(card.userResized).toBe(true);
-    expect(a.document().nodes.A).toEqual({ pos: [123, 456], size: [320, 400] });
+    expect(a.document().nodes.A).toEqual({ pos: [123, 456], size: [320, 450] });
   });
 
   it("keeps a stable edge id's link current: colour follows a condition change, and a retarget recreates the link", () => {
@@ -191,6 +193,17 @@ describe("GraphAdapter: the user's side", () => {
     expect(a.card("A")!.inputs).toHaveLength(1);
   });
 
+  it("reports that a sync changed the document when a card flips live or a draft wire becomes the daemon's", () => {
+    const a = make();
+    expect(a.sync(g([n("A")], []), layout())).toBe(true);
+    expect(a.sync(g([n("A")], []), layout())).toBe(false);
+    const draft = a.addDraft("agent/goal", [500, 40], { values: { summary: "x" } }, "D")!;
+    a.addDraftLink(draft, 0, a.card("A")!);
+    a.markStarting(["D"]);
+    expect(a.sync(g([n("A"), n("D", "D")], [["D", "A", "handoff"]]), layout())).toBe(true);
+    expect(a.sync(g([n("A"), n("D", "D")], [["D", "A", "handoff"]]), layout())).toBe(false);
+  });
+
   it("reverts starting cards to draft, all of them or the ones named", () => {
     const a = make();
     a.sync(g([], []), layout());
@@ -244,6 +257,17 @@ describe("GraphAdapter: the user's side", () => {
     // A second sync with the same layout does not restore twice.
     a.sync(g([n("A")], []), saved);
     expect(ids(a)).toEqual(["A", "D1", "D2"]);
+  });
+
+  it("restoreDrafts skips an id the daemon already reported", () => {
+    const a = new GraphAdapter(new LGraph(), host(), newID);
+    const saved: CanvasDoc = { ...layout(), nodes: { A: { pos: [1, 2] } }, drafts: { A: { type: "agent/goal", title: "Old", values: { summary: "s" } } } };
+    a.sync(g([n("A")], []), saved);
+    a.types = types;
+    a.sync(g([n("A")], []), saved);
+    expect(ids(a)).toEqual(["A"]);
+    expect(a.card("A")!.cardMode).toBe("live");
+    expect(a.document().drafts.A).toBeUndefined();
   });
 
   it("writes a workflow with every card as a definition and every wire, live or draft", () => {

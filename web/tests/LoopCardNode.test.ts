@@ -150,9 +150,9 @@ describe("a live card", () => {
     expect(field(c, "summary").value).toBe("Build the feature");
     expect(field(c, "summary").readOnly).toBe(true);
     expect(field(c, TITLE_FIELD).readOnly).toBe(false);
-    const combo = (c.widgets ?? []).find((w) => w.name === "Model") as unknown as { value: unknown; disabled?: boolean };
-    expect(combo.value).toBe("capable");
-    expect(combo.disabled).toBe(true);
+    const model = field(c, "Model");
+    expect(model.value).toBe("capable");
+    expect(model.readOnly).toBe(true);
     expect(badgeText(c)).toBe("RUNNING");
     const actions = (c.widgets ?? []).find((w) => w.name === "actions") as unknown as { buttons: Array<{ label: string; enabled: boolean; onClick(): void }> };
     expect(actions.buttons.map((b) => [b.label, b.enabled])).toEqual([["Stop", true], ["Restart", true]]);
@@ -193,11 +193,22 @@ describe("a live card", () => {
     expect(field(c, "summary").readOnly).toBe(true);
   });
 
-  it("shows a timed loop's interval as a number widget", () => {
+  it("shows a timed loop's interval as a read-only field", () => {
     const c = card();
     c.applyLive(live({ loopType: "timeBased", triggerPrompt: "/loop 1h tidy", heartbeatIntervalSeconds: 900, goal: undefined }), timed);
-    const interval = (c.widgets ?? []).find((w) => w.name === "Every (seconds)") as unknown as { value: unknown };
-    expect(interval.value).toBe(900);
+    const interval = field(c, "Every (seconds)");
+    expect(interval.value).toBe("900");
+    expect(interval.readOnly).toBe(true);
+  });
+
+  it("a starting card keeps its litegraph widgets and ignores a change", () => {
+    const c = card();
+    c.setup(goal, { type: "agent/goal", title: "", values: { summary: "x" } });
+    c.markStarting();
+    const model = (c.widgets ?? []).find((w) => w.name === "Model") as unknown as { callback?: (value: unknown) => void; value: unknown };
+    model.callback?.("capable");
+    expect(c.values.model).toBe("standard");
+    expect(model.value).toBe("standard");
   });
 });
 

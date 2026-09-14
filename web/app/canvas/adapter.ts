@@ -67,14 +67,19 @@ export class GraphAdapter {
     return null;
   }
 
-  /** Overlays the daemon's graph: live cards and links follow it, drafts and draft links are left alone. */
-  sync(graph: LoopGraph, layout: CanvasDoc): void {
+  /**
+   * Overlays the daemon's graph: live cards and links follow it, drafts and draft links are left alone.
+   * Returns whether the document changed under the daemon's hand, so the caller can save it.
+   */
+  sync(graph: LoopGraph, layout: CanvasDoc): boolean {
+    let changed = false;
     if (!this.restored) this.pendingLayout = layout;
     const positions = placeNodes(graph, layout.nodes);
     const wanted = new Set(graph.nodes.map((node) => node.id));
     for (const card of this.cards()) if (card.cardMode === "live" && !wanted.has(String(card.id))) this.removeCard(card);
     for (const loop of graph.nodes) {
       const card = this.card(loop.id) ?? this.newCard(loop.id, positions.get(loop.id) ?? [40, 40], layout.nodes[loop.id]?.size);
+      if (card.cardMode !== "live") changed = true;
       card.applyLive(loop, typeForLoop(this.types, loop.loopType));
     }
     // Drafts come after the live cards, so a draft wire into a live card finds its end.
@@ -86,8 +91,8 @@ export class GraphAdapter {
     // A draft wire litegraph removed (dropped on empty canvas) is forgotten; one the daemon now
     // reports as an edge is the daemon's from here on and is redrawn below as a live link.
     for (const [linkID, record] of [...this.draftLinks]) {
-      if (!this.lgraph.links.get(linkID)) this.draftLinks.delete(linkID);
-      else if (graph.edges.some((edge) => sameEdge(edge, record))) this.dropLink(linkID);
+      if (!this.lgraph.links.get(linkID)) { this.draftLinks.delete(linkID); changed = true; }
+      else if (graph.edges.some((edge) => sameEdge(edge, record))) { this.dropLink(linkID); changed = true; }
     }
 
     const wantedEdges = new Map(graph.edges.map((edge) => [edge.id, edge]));
@@ -121,6 +126,7 @@ export class GraphAdapter {
     for (const [edgeID, link] of this.linkByEdge) link.color = conditionColor[wantedEdges.get(edgeID)!.condition] ?? conditionColor.always;
     for (const card of this.cards()) card.pruneInputs();
     this.lgraph.setDirtyCanvas(true, true);
+    return changed;
   }
 
   /** A draft card at `pos`. `record` supplies title and values when restoring or loading; `id` and `size` likewise. Null when the type is not loaded. */
@@ -271,6 +277,8 @@ export class GraphAdapter {
   private restoreDrafts(layout: CanvasDoc): void {
     this.orphans = { drafts: {}, nodes: {}, edges: [] };
     for (const [id, record] of Object.entries(layout.drafts)) {
+      // A draft the daemon has since reported is live; its stale entry goes on the next save.
+      if (this.card(id)) continue;
       const placed = layout.nodes[id];
       if (this.addDraft(record.type, placed?.pos ?? [40, 40], record, id, placed?.size)) continue;
       this.orphans.drafts[id] = record;

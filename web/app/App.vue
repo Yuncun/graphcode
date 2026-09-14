@@ -18,6 +18,8 @@ import ProjectsPanel from "./sidebar/ProjectsPanel.vue";
 
 /** How long a starting card waits for the daemon's echo before it goes back to draft (plan ruling 8). */
 const START_TIMEOUT_MS = 10_000;
+/** Mutable so a browser test can shrink the wait; every new timer is armed with the current value. */
+let startTimeoutMs = START_TIMEOUT_MS;
 
 const store = createStore();
 /** Holds the canvas so a project being closed can have its pending layout save written first. */
@@ -127,7 +129,7 @@ function startCards(only?: string[]) {
     adapter.markStarting(plan.creates.map((c) => c.id));
     const armed = startTimers.get(project);
     if (armed) clearTimeout(armed);
-    startTimers.set(project, setTimeout(() => revertStarting(project, `the daemon did not report the new loop within ${START_TIMEOUT_MS / 1000} s`), START_TIMEOUT_MS));
+    startTimers.set(project, setTimeout(() => revertStarting(project, `the daemon did not report the new loop within ${startTimeoutMs / 1000} s`), startTimeoutMs));
   }
   canvasView.value?.touch(project);
 }
@@ -139,7 +141,11 @@ function revertStarting(project: string, why: string) {
   startTimers.delete(project);
   const adapter = adapterFor(project);
   if (!adapter) return;
-  const reverted = adapter.revertStarting();
+  // The store holds what the daemon reported even for a project not on screen; a card it has is
+  // live the next time that project is shown, so only the cards it does not have go back to draft.
+  const reported = new Set((store.projects.get(project)?.nodes ?? []).map((n) => n.id));
+  const stale = adapter.cards().filter((c) => c.cardMode === "starting" && !reported.has(String(c.id))).map((c) => String(c.id));
+  const reverted = stale.length ? adapter.revertStarting(stale) : [];
   if (!reverted.length) return;
   store.pushError(`${reverted.length === 1 ? "1 card" : `${reverted.length} cards`} went back to draft: ${why}`);
   canvasView.value?.touch(project);
@@ -229,6 +235,7 @@ onMounted(() => {
     counts: () => counts.value,
     widgetBox: (project: string, id: string, name: string) => canvasView.value?.widgetBox(project, id, name) ?? null,
     buttonBox: (project: string, id: string, label: string) => canvasView.value?.buttonBox(project, id, label) ?? null,
+    setStartTimeout: (ms: number) => { startTimeoutMs = ms; },
   };
   connection.open();
   void refreshWorkflows();

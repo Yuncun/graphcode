@@ -108,7 +108,7 @@ async function show(graph: LoopGraph): Promise<void> {
   const token = ++shows;
   const view = await viewFor(graph.project.path);
   view.adapter.types = props.nodeTypes;
-  view.adapter.sync(graph, view.layout);
+  const changed = view.adapter.sync(graph, view.layout);
   if (token !== shows || !canvas) return;
   if (canvas.graph !== view.adapter.lgraph) {
     editor?.close(true);
@@ -126,6 +126,7 @@ async function show(graph: LoopGraph): Promise<void> {
     if (fitToNodes(canvas, view.adapter.lgraph.nodes)) view.viewport = readViewport(canvas.ds);
   }
   canvas.setDirty(true, true);
+  if (changed) saves.schedule(view.project);
   emit("documentChanged", counts(view));
 }
 
@@ -136,7 +137,7 @@ async function save(project: string): Promise<void> {
   try {
     await putLayout(project, view.layout);
   } catch (error) {
-    console.warn("graphcode: could not save the canvas layout", error);
+    emit("problem", `the canvas could not be saved: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

@@ -159,7 +159,9 @@ async function openBeta(page: Page, h: Harness): Promise<void> {
   await expect.poll(async () => (await cardByID(page, h.beta, ID.betaTwo))?.values.summary).toBe("Second project's loop");
 }
 
-const canvasJSON = (dir: string) => JSON.parse(fs.readFileSync(path.join(dir, ".graphcode", "canvas.json"), "utf8")) as { version: number; nodes: Record<string, { pos: [number, number]; size?: [number, number] }>; drafts: Record<string, unknown>; draftEdges: unknown[] };
+/** Parses a file that may still be mid-write (`writeFile` is not atomic): null rather than throwing on a half-written file, so a poll can retry. */
+const parsedFile = (file: string): any | null => { try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; } };
+const canvasJSON = (dir: string) => parsedFile(path.join(dir, ".graphcode", "canvas.json")) as { version: number; nodes: Record<string, { pos: [number, number]; size?: [number, number] }>; drafts: Record<string, unknown>; draftEdges: unknown[] };
 
 test.describe("phase 2 surface", () => {
   let h: Harness;
@@ -186,7 +188,7 @@ test.describe("phase 2 surface", () => {
     expect(receivedGraphCommands(h, "createNode")).toEqual([]);
     expect(await nodeCount(page, h.alpha)).toBe(9);
     await shot(page, "P2-01-draft-card");
-    await expect.poll(() => fs.existsSync(path.join(h.alpha, ".graphcode", "canvas.json")) && id in canvasJSON(h.alpha).drafts, { timeout: 5_000 }).toBe(true);
+    await expect.poll(() => parsedFile(path.join(h.alpha, ".graphcode", "canvas.json")) !== null && id in canvasJSON(h.alpha).drafts, { timeout: 5_000 }).toBe(true);
     expect(canvasJSON(h.alpha).version).toBe(2);
     await page.reload();
     await openAlpha(page, h);
@@ -270,7 +272,7 @@ test.describe("phase 2 surface", () => {
     await shot(page, "P2-04-resized");
     // expect.poll does not retry a thrown error (unlike a mismatched value), so guard the read
     // the same way P2-01 does: the file may not exist yet on the first tick or two.
-    await expect.poll(() => fs.existsSync(path.join(h.alpha, ".graphcode", "canvas.json")) ? canvasJSON(h.alpha).nodes[id]?.size?.[1] : undefined, { timeout: 5_000 }).toBe(after[1]);
+    await expect.poll(() => parsedFile(path.join(h.alpha, ".graphcode", "canvas.json")) !== null ? canvasJSON(h.alpha).nodes[id]?.size?.[1] : undefined, { timeout: 5_000 }).toBe(after[1]);
     expect(h.pageErrors).toEqual([]);
   });
 
@@ -298,6 +300,7 @@ test.describe("phase 2 surface", () => {
       expect(receivedGraphCommands(h, "createNode")[0]!.createNode._0).toMatchObject({ id, loopType: "goalBased", goal: { summary: "Ship it" } });
       expect(receivedGraphCommands(h, "createEdge")[0]!.createEdge).toEqual({ from: id, to: ID.betaOne, spec: { kind: s.kind, condition: s.condition, payloadTransform: { none: {} } } });
       await expect.poll(async () => (await cardByID(page, h.beta, id))?.mode).toBe("live");
+      await expect.poll(() => Object.keys(parsedFile(path.join(h.beta, ".graphcode", "canvas.json"))?.drafts ?? { x: 1 }).length, { timeout: 5_000 }).toBe(0);
       await expect.poll(() => edgeCount(page, h.beta)).toBe(2);
       await expect.poll(() => g(page)).toEqual({ drafts: 0, wires: 0 });
       await shot(page, `${s.row}-${s.slug}-live`);
@@ -477,8 +480,8 @@ test.describe("phase 2 surface", () => {
     page.once("dialog", (d) => { void d.accept("Release pipeline"); });
     await page.getByTestId("save-workflow").click();
     const file = path.join(h.workflowsDir, "Release pipeline.json");
-    await expect.poll(() => fs.existsSync(file), { timeout: 5_000 }).toBe(true);
-    const saved = JSON.parse(fs.readFileSync(file, "utf8")) as { version: number; name: string; cards: Record<string, { type: string; title: string; values: Record<string, unknown>; pos: [number, number]; size: [number, number] }>; edges: Array<{ from: string; to: string; kind: string; condition: string }> };
+    await expect.poll(() => parsedFile(file) !== null, { timeout: 5_000 }).toBe(true);
+    const saved = parsedFile(file) as { version: number; name: string; cards: Record<string, { type: string; title: string; values: Record<string, unknown>; pos: [number, number]; size: [number, number] }>; edges: Array<{ from: string; to: string; kind: string; condition: string }> };
     expect(saved.version).toBe(1);
     expect(saved.name).toBe("Release pipeline");
     expect(Object.keys(saved.cards)).toHaveLength(10);
@@ -499,7 +502,7 @@ test.describe("phase 2 surface", () => {
     await openAlpha(page, h);
     page.once("dialog", (d) => { void d.accept("alpha as template"); });
     await page.getByTestId("save-workflow").click();
-    await expect.poll(() => fs.existsSync(path.join(h.workflowsDir, "alpha as template.json")), { timeout: 5_000 }).toBe(true);
+    await expect.poll(() => parsedFile(path.join(h.workflowsDir, "alpha as template.json")) !== null, { timeout: 5_000 }).toBe(true);
     await page.getByTestId("tab-name").nth(1).click();
     await expect.poll(() => page.evaluate(() => window.__graphcode.active())).toBe(h.beta);
     const rightEdge = Math.max(...(await cards(page, h.beta)).map((c) => c.pos[0] + c.size[0]));
@@ -554,6 +557,7 @@ test.describe("phase 2 surface", () => {
     await page.waitForTimeout(200);
     await expect(page.getByTestId("field-editor")).toHaveCount(0);
     expect((await cardByID(page, h.alpha, ID.docs))!.pos).toEqual(card.pos);
+    expect(await page.evaluate(([p, i]) => window.__graphcode.widgetBox(p, i, "Model"), [h.alpha, ID.docs] as const)).not.toBeNull();
     await shot(page, "P2-17-live-read-only");
     expect(h.pageErrors).toEqual([]);
   });
@@ -580,6 +584,44 @@ test.describe("phase 2 surface", () => {
     expect(expected.y).toBeGreaterThan(after.y);
     expect(expected.y).toBeLessThan(after.y + after.height);
     await shot(page, "P2-18-editor-follows");
+    expect(h.pageErrors).toEqual([]);
+  });
+
+  test("P2-19 a Start on a project that is then left for another tab is not reverted by the backstop", async ({ page }) => {
+    h = await launch();
+    await openBeta(page, h);
+    const id = await dropType(page, "agent/goal", await emptyPoint(page));
+    await fillField(page, h.beta, id, "summary", "Ship it");
+    await page.evaluate(() => window.__graphcode.setStartTimeout(800));
+    const start = await buttonPoint(page, h.beta, id, "Start");
+    await page.mouse.click(start.x, start.y);
+    await page.getByTestId("tab-name").nth(0).click();
+    await expect.poll(() => page.evaluate(() => window.__graphcode.active())).toBe(h.alpha);
+    await page.waitForTimeout(1500);
+    await page.getByTestId("tab-name").nth(1).click();
+    await expect.poll(async () => (await cardByID(page, h.beta, id))?.mode).toBe("live");
+    await expect(page.getByTestId("status")).not.toContainText("went back to draft");
+    expect(await g(page)).toEqual({ drafts: 0, wires: 0 });
+    await shot(page, "P2-19-start-then-switch");
+    expect(h.pageErrors).toEqual([]);
+  });
+
+  test("P2-20 a started card survives a reload as one live card", async ({ page }) => {
+    h = await launch();
+    await openBeta(page, h);
+    const id = await dropType(page, "agent/goal", await emptyPoint(page));
+    await fillField(page, h.beta, id, "summary", "Ship it");
+    const start = await buttonPoint(page, h.beta, id, "Start");
+    await page.mouse.click(start.x, start.y);
+    await expect.poll(async () => (await cardByID(page, h.beta, id))?.mode).toBe("live");
+    await page.reload();
+    await openBeta(page, h);
+    await expect.poll(async () => (await cards(page, h.beta)).length).toBe(3);
+    const found = (await cards(page, h.beta)).filter((c) => c.id === id);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.mode).toBe("live");
+    expect(await g(page)).toEqual({ drafts: 0, wires: 0 });
+    await shot(page, "P2-20-started-then-reload");
     expect(h.pageErrors).toEqual([]);
   });
 });

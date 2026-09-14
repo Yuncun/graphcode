@@ -32,6 +32,9 @@ export interface CardHost {
 /** What the card reads and writes on a litegraph combo, number or toggle widget. `addWidget` returns a union that is not `IWidget`; this is the part in use. */
 interface ValueWidget { value?: unknown; disabled?: boolean }
 
+/** How a value reads on a read-only field: blank for none, "yes"/"no" for a toggle, else its string form. */
+const valueText = (value: unknown): string => value == null ? "" : typeof value === "boolean" ? (value ? "yes" : "no") : String(value);
+
 export interface OutputSlotDef { name: string; kind: EdgeKind; condition: EdgeCondition }
 
 /** The card's outputs in slot order. A drag from one of them makes a wire of that kind and condition. */
@@ -157,6 +160,15 @@ export class LoopCardNode extends LGraphNode {
 
   private addWidgetFor(w: WidgetDef): void {
     const label = w.label ?? w.name;
+    if (this.cardMode === "live" && w.type !== "text") {
+      // litegraph draws a disabled widget with no value; a live card shows its value as a read-only field instead.
+      // Named by its label (not w.name), matching how litegraph's own combo/number/toggle widgets are
+      // named here: widgetBox and every test that looks a widget up by name expect the label ("Model").
+      const field = new FieldWidget(label, label, valueText(this.values[w.name]));
+      this.fields.set(w.name, field);
+      this.addCustomWidget(field as unknown as IWidget);
+      return;
+    }
     switch (w.type) {
       case "text": {
         const field = new FieldWidget(w.name, label, String(this.values[w.name] ?? ""), { multiline: !!w.multiline, placeholder: w.placeholder ?? "", required: !!w.required });
@@ -179,6 +191,12 @@ export class LoopCardNode extends LGraphNode {
 
   /** From a litegraph widget's callback or the editor: one value changed. */
   setValue(name: string, value: unknown): void {
+    if (this.cardMode !== "draft") {
+      // A starting card's widgets still take clicks; the value goes back to what was sent.
+      const widget = this.builtins.get(name);
+      if (widget) widget.value = this.values[name] ?? widget.value;
+      return;
+    }
     this.values[name] = value;
     this.refresh();
     this.host?.onChanged(this);
@@ -191,6 +209,7 @@ export class LoopCardNode extends LGraphNode {
       if (this.cardMode === "live") {
         if (title && title !== this.title) this.host?.onRename(this, title);
         this.titleField.value = this.title;
+        this.setDirtyCanvas(true, true);
         return;
       }
       this.title = title;
@@ -218,7 +237,7 @@ export class LoopCardNode extends LGraphNode {
       else this.setupBare(loop.title);
     } else if (def) {
       this.values = valuesForLoop(def, loop);
-      for (const [name, field] of this.fields) field.value = String(this.values[name] ?? "");
+      for (const [name, field] of this.fields) field.value = valueText(this.values[name]);
       for (const [name, widget] of this.builtins) widget.value = this.values[name] ?? widget.value;
     }
     this.title = loop.title;
@@ -290,7 +309,6 @@ export class LoopCardNode extends LGraphNode {
     const starting = this.cardMode === "starting";
     for (const field of this.fields.values()) field.readOnly = live || starting;
     this.titleField.readOnly = starting;
-    for (const widget of this.builtins.values()) widget.disabled = live || starting;
     if (live && this.loop) {
       const state = stateName(this.loop);
       this.badges = [new LGraphBadge({ text: stateWord[state] ?? state, bgColor: stateColor[state] ?? "#6b7079", fgColor: "#ffffff" })];

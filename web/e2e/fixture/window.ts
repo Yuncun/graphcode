@@ -27,4 +27,5 @@ export interface GraphcodeWindow {
   counts(): { drafts: number; wires: number };
   widgetBox(project: string, id: string, name: string): Box | null;
   buttonBox(project: string, id: string, label: string): Box | null;
+  setStartTimeout(ms: number): void;
 }
