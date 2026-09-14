@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { createStore } from "./daemon/store.ts";
 import { DaemonConnection, type ConnectionStatus } from "./daemon/connection.ts";
 import type { DaemonCommand } from "./daemon/protocol.ts";
+import { loadNodeTypes, type NodeTypeEntry } from "./nodes/registry.ts";
 import GraphCanvas from "./canvas/GraphCanvas.vue";
 import ProjectTabs from "./tabs/ProjectTabs.vue";
+import Sidebar from "./sidebar/Sidebar.vue";
+import NodesPanel from "./sidebar/NodesPanel.vue";
+import WorkflowsPanel from "./sidebar/WorkflowsPanel.vue";
 
 const store = createStore();
 /** Holds the canvas so a project being closed can have its pending layout save written first. */
@@ -12,6 +16,12 @@ const canvasView = ref<InstanceType<typeof GraphCanvas> | null>(null);
 const status = ref<ConnectionStatus>("connecting");
 const active = ref<string | null>(null);
 const connection = new DaemonConnection(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+
+/** Node types for the active project: its own pack, the user's, and the built-ins. */
+const nodeTypes = ref<NodeTypeEntry[]>([]);
+const nodeTypesLoading = ref(false);
+/** Counts loads so a slow answer for an earlier project cannot overwrite a newer one. */
+let nodeTypeLoads = 0;
 
 /**
  * DaemonConnection.send throws when the socket is not open, so every command goes through here:
@@ -58,6 +68,28 @@ function openProject(path: string) {
   active.value = path;
 }
 
+async function reloadNodeTypes() {
+  const load = ++nodeTypeLoads;
+  const project = active.value;
+  nodeTypesLoading.value = true;
+  try {
+    const entries = await loadNodeTypes(project);
+    if (load === nodeTypeLoads) nodeTypes.value = entries;
+  } catch (error) {
+    // openProject sets `active` to the path it asked for before the daemon confirms it: a
+    // path the daemon then rejects never joins store.order, and its own errorOccurred already
+    // told the user why, so this listing failure (its project query 400s) must not overwrite
+    // that message in the footer with a less specific one.
+    if (project === null || store.order.includes(project)) {
+      store.pushError(error instanceof Error ? error.message : String(error));
+    }
+  } finally {
+    if (load === nodeTypeLoads) nodeTypesLoading.value = false;
+  }
+}
+// A project's own pack can shadow a built-in, so the list follows the active tab.
+watch(active, () => { void reloadNodeTypes(); }, { immediate: true });
+
 onMounted(() => {
   (window as unknown as { __graphcode: unknown }).__graphcode = {
     store,
@@ -65,6 +97,7 @@ onMounted(() => {
     active: () => active.value,
     positions: (project: string) => canvasView.value?.positions(project),
     viewport: () => canvasView.value?.viewport(),
+    nodeTypes: () => nodeTypes.value,
   };
   connection.open();
 });
@@ -73,8 +106,17 @@ onMounted(() => {
 <template>
   <main class="shell">
     <ProjectTabs :paths="store.order" :names="names" :active="active" @select="active = $event" @close="closeProject" @open="openProject" />
-    <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" />
-    <div v-else class="empty" data-testid="empty">{{ status === "open" ? "No open projects. Press + to open a folder." : "Connecting to graphcoded…" }}</div>
+    <div class="body">
+      <Sidebar>
+        <template #nodes><NodesPanel :entries="nodeTypes" :loading="nodeTypesLoading" @reload="reloadNodeTypes" /></template>
+        <template #workflows><WorkflowsPanel :recent="store.recent" @open="openProject" /></template>
+      </Sidebar>
+      <section class="center">
+        <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" />
+        <div v-else class="empty" data-testid="empty">{{ status === "open" ? "No open projects. Press + to open a folder." : "Connecting to graphcoded…" }}</div>
+      </section>
+      <aside class="inspector" data-testid="inspector"><p class="hint" data-testid="inspector-hint">Select a card, or drag a node type from the Nodes tab onto the canvas.</p></aside>
+    </div>
     <footer class="status" data-testid="status">{{ status }}<span v-if="lastError" class="error"> · {{ lastError }}</span></footer>
   </main>
 </template>
@@ -83,7 +125,11 @@ onMounted(() => {
 html, body, #app { height: 100%; margin: 0; }
 body { background: #17191d; color: #e8e6e1; font-family: -apple-system, "Helvetica Neue", sans-serif; font-size: 14px; }
 .shell { height: 100%; display: flex; flex-direction: column; }
+.body { flex: 1; display: flex; min-height: 0; }
+.center { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .empty { flex: 1; display: grid; place-items: center; color: #8b909a; }
+.inspector { width: 300px; flex: none; overflow: auto; background: #1e2126; border-left: 1px solid #2f333a; padding: 10px; box-sizing: border-box; }
+.inspector .hint { color: #8b909a; font-size: 12px; margin: 0; }
 .status { padding: 4px 10px; font-size: 12px; color: #8b909a; border-top: 1px solid #2f333a; background: #1e2126; }
 .error { color: #f4b58f; }
 </style>
