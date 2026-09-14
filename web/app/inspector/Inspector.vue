@@ -50,8 +50,10 @@ function create() {
 
 // Selected loop.
 const renameTitle = ref("");
-// Reset on a new node or a title change from the daemon, not on every live-line update, so typing is not clobbered.
-watch(() => [props.node?.id, props.node?.title] as const, ([, t]) => { renameTitle.value = t ?? ""; }, { immediate: true });
+// Two getters, not one getter returning an array: Vue compares each source on its own value, so a
+// live-line update elsewhere (id and title unchanged) does not re-run this and clobber what the
+// user is typing, the way a single getter's fresh-array-every-time result otherwise would.
+watch([() => props.node?.id, () => props.node?.title], ([, t]) => { renameTitle.value = t ?? ""; }, { immediate: true });
 const fields = computed(() => (props.node ? fieldsFor(props.node) : []));
 const edges = computed(() => (props.node && props.graph ? edgesFor(props.graph, props.node.id) : []));
 const renameReady = computed(() => !!props.node && renameTitle.value.trim() !== "" && renameTitle.value.trim() !== props.node.title);

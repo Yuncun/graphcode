@@ -7,6 +7,7 @@ import { NODE_TYPE_MIME } from "../sidebar/library.ts";
 import { GraphAdapter, type CanvasDoc } from "./adapter.ts";
 import { getLayout, putLayout } from "./layoutClient.ts";
 import { linkRequestFrom, type DraggedLink, type LinkRequest } from "./linkRequest.ts";
+import { onUserLinkDrop } from "./LoopCardNode.ts";
 import { mergeReserved, type Reservation } from "./reserved.ts";
 import { createSaveScheduler } from "./saveScheduler.ts";
 import { applyViewport, fitToNodes, readViewport, type Viewport } from "./viewport.ts";
@@ -154,8 +155,18 @@ onMounted(async () => {
   LiteGraph.release_link_on_empty_shows_menu = false;
   canvas.ds.offset = [...VIEW_MARGIN];
   canvas.onNodeMoved = () => saves.schedule(props.graph.project.path);
-  canvas.onNodeSelected = (node) => emit("select", String(node.id));
-  canvas.onNodeDeselected = () => { if (canvas && canvas.selectedItems.size === 0) emit("select", null); };
+  // litegraph calls this on both a select and a deselectAll (an empty-canvas click goes through
+  // deselectAll, which skips onNodeDeselected entirely); a multi-selection shows the hint (null).
+  canvas.onSelectionChange = (selected) => {
+    const ids = Object.keys(selected);
+    emit("select", ids.length === 1 ? ids[0]! : null);
+  };
+  // A user's drop on a card's *input dot* (only a card with an existing incoming edge has one)
+  // never reaches the link connector's events; LoopCardNode reports it here instead.
+  onUserLinkDrop(({ from, to, fromSlotIndex }) => {
+    const request = linkRequestFrom([{ node: from, fromSlotIndex, toType: "input" }], to);
+    if (request) emit("link", request);
+  });
   const events = canvas.linkConnector.events;
   // A link dropped on a card's body: ask the daemon for the edge and let litegraph connect nothing.
   events.addEventListener("dropped-on-node", (event) => {
@@ -198,6 +209,7 @@ defineExpose({
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", fit);
+  onUserLinkDrop(null);
   canvas?.stopRendering();
   canvas = null;
 });

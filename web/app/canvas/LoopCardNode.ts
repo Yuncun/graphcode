@@ -58,6 +58,11 @@ export function connectAsAdapter<T>(connect: () => T): T {
   }
 }
 
+export interface UserLinkDrop { from: LGraphNode; to: LGraphNode; fromSlotIndex: number }
+let userLinkHandler: ((drop: UserLinkDrop) => void) | null = null;
+/** GraphCanvas registers here; a user's link dropped on a card's input dot reaches it through onConnectInput. */
+export function onUserLinkDrop(handler: ((drop: UserLinkDrop) => void) | null): void { userLinkHandler = handler; }
+
 /** One GraphCode loop drawn as a card: title bar in the type colour, state badge, live line, meta row. */
 export class LoopCardNode extends LGraphNode {
   static override title = "Loop";
@@ -100,7 +105,13 @@ export class LoopCardNode extends LGraphNode {
     this.setDirtyCanvas(true, true);
   }
 
-  override onConnectInput(): boolean {
+  /**
+   * litegraph calls this for a user's drag as well as the adapter's own connect; only the adapter
+   * may actually connect (see `adapterIsConnecting` above), but a user's drop still needs to reach
+   * the daemon, so it is reported to whoever GraphCanvas has registered via `onUserLinkDrop`.
+   */
+  override onConnectInput(_targetSlot: number, _type: unknown, _output: unknown, node: unknown, slot: number): boolean {
+    if (!adapterIsConnecting && node instanceof LGraphNode) userLinkHandler?.({ from: node, to: this, fromSlotIndex: slot });
     return adapterIsConnecting;
   }
 

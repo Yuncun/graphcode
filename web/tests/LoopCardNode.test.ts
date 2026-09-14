@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { cachedTruncate, LoopCardNode } from "../app/canvas/LoopCardNode.ts";
+import { cachedTruncate, LoopCardNode, onUserLinkDrop, type UserLinkDrop } from "../app/canvas/LoopCardNode.ts";
 import { CARD_WIDTH, cardHeight, OUTPUT_SLOTS, outputSlotFor, TEXT_BLOCK } from "../app/canvas/LoopCardNode.ts";
-import { LiteGraph } from "@comfyorg/litegraph";
+import { LGraph, LiteGraph } from "@comfyorg/litegraph";
 
 function fakeCtx(charWidth = 6) {
   let calls = 0;
@@ -94,5 +94,23 @@ describe("card slots and size", () => {
     expect([card.size[0], card.size[1]]).toEqual([CARD_WIDTH, cardHeight(0)]);
     for (let i = 0; i < 7; i++) card.addInput("handoff", "handoff");
     expect(card.size[1]).toBe(cardHeight(7));
+  });
+});
+
+describe("onUserLinkDrop", () => {
+  it("reports a user's drag onto a card's input dot, and never actually connects it", () => {
+    const lgraph = new LGraph();
+    const a = new LoopCardNode(); a.id = "A"; lgraph.add(a);
+    const b = new LoopCardNode(); b.id = "B"; b.addInput("handoff", "handoff"); lgraph.add(b);
+    const sizeBefore = lgraph.links.size;
+    const drops: UserLinkDrop[] = [];
+    onUserLinkDrop((drop) => drops.push(drop));
+    try {
+      expect(a.connect(1, b, 0)).toBe(null);
+      expect(lgraph.links.size).toBe(sizeBefore);
+      expect(drops).toEqual([{ from: a, to: b, fromSlotIndex: 1 }]);
+    } finally {
+      onUserLinkDrop(null);
+    }
   });
 });
