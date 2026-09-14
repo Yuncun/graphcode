@@ -29,6 +29,8 @@ async function nodeCountFromDaemon(): Promise<number> {
 
 test("the canvas shows every node the daemon reports for twodrive", async ({ page }) => {
   const expected = await nodeCountFromDaemon();
+  // Without this the comparison below passes for free if the daemon reports an empty project.
+  expect(expected).toBeGreaterThan(0);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("http://localhost:4790");

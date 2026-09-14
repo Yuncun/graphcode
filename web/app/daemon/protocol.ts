@@ -40,7 +40,8 @@ export interface LoopEdge {
 
 export interface LoopGraph {
   id: string;
-  revision: number;
+  /** Optional in the Swift LoopGraph, so a graph can arrive without one. */
+  revision?: number;
   project: ProjectRef;
   nodes: LoopNode[];
   edges: LoopEdge[];

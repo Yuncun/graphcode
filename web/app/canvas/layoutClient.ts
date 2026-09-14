@@ -10,9 +10,12 @@ export async function getLayout(project: string): Promise<CanvasDoc> {
 }
 
 export async function putLayout(project: string, doc: CanvasDoc): Promise<void> {
-  await fetch(url(project), {
+  const res = await fetch(url(project), {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(doc),
   });
+  // A refusal answers with a status, not a thrown error, so without this a rejected layout
+  // would look exactly like a saved one.
+  if (!res.ok) console.warn(`graphcode: the bridge refused the canvas layout (HTTP ${res.status})`);
 }

@@ -30,6 +30,22 @@ describe("store", () => {
     expect(s.projects.get("/p/a")?.revision).toBe(6);
   });
 
+  it("applies nodesChanged to a graph that arrived without a revision", () => {
+    const s = createStore();
+    const withoutRevision: LoopGraph = { id: "G", project: { path: "/p/a", name: "a" }, nodes: [node("N1", "old")], edges: [] };
+    s.applyEvent({ graphChanged: { _0: withoutRevision } });
+    s.applyEvent({ nodesChanged: { projectPath: "/p/a", revision: 1, nodes: [node("N1", "new")] } });
+    expect(s.projects.get("/p/a")?.nodes[0]?.title).toBe("new");
+  });
+
+  it("keeps only the 50 newest errors", () => {
+    const s = createStore();
+    for (let i = 0; i < 60; i++) s.applyEvent({ errorOccurred: { _0: `boom ${i}` } });
+    expect(s.errors).toHaveLength(50);
+    expect(s.errors[0]).toBe("boom 10");
+    expect(s.errors[49]).toBe("boom 59");
+  });
+
   it("records recent projects and errors", () => {
     const s = createStore();
     s.applyEvent({ recentProjectsListed: { _0: [{ path: "/p/a", name: "a", lastOpenedAt: 1 }] } });

@@ -9,7 +9,13 @@ function summaryText(summary: unknown): string {
   return typeof last?.text === "string" ? last.text : "";
 }
 
-/** Same priority as the Swift app's LoopCardPresentation: stall reason, summary beat, activity. */
+/**
+ * The one line of live text on a card: the stall reason the daemon set, else the latest summary
+ * beat, else the current activity. The Swift app's LoopCardPresentation is not this. It shows a
+ * stall reason only while the loop is actually stalled, and where this returns nothing it falls
+ * back to what the loop was handed: the goal summary, the trigger prompt, or the first
+ * instruction. Phase 0 asked for the simpler line.
+ */
 export function liveLine(node: LoopNode): string {
   return node.stallReason || summaryText(node.summary) || node.activity || "";
 }
