@@ -182,6 +182,16 @@ function fit(): void {
   canvas.setDirty(true, true);
 }
 
+/**
+ * A widget's `last_y` is only assigned inside litegraph's own draw pass, which normally runs on
+ * the next animation frame; a card added this instant (a drop, a workflow load) has not had one
+ * yet, so `widgetBox`/`buttonBox` would read every widget's stale, undrawn position. Forcing one
+ * synchronous frame here makes every widget's geometry correct the moment a browser test asks for it.
+ */
+function forceLayout(): void {
+  canvas?.draw(true, true);
+}
+
 onMounted(async () => {
   const view = await viewFor(props.graph.project.path);
   const element = canvasEl.value;
@@ -307,6 +317,7 @@ defineExpose({
   document: (project: string) => resolved.get(project)?.adapter.document(),
   /** A widget's box in node space, so a browser test can click into it: a text field's box, or a litegraph widget's row. */
   widgetBox: (project: string, id: string, name: string): [number, number, number, number] | null => {
+    forceLayout();
     const card = resolved.get(project)?.adapter.card(id);
     const widget = card?.widgets?.find((w) => w.name === name);
     if (!card || !widget) return null;
@@ -316,6 +327,7 @@ defineExpose({
   },
   /** A button's box in node space, by its label. */
   buttonBox: (project: string, id: string, label: string): [number, number, number, number] | null => {
+    forceLayout();
     const card = resolved.get(project)?.adapter.card(id);
     if (!card) return null;
     let row: ButtonRowWidget | undefined;
@@ -336,12 +348,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="hostEl" class="canvas-host" @dragover="onDragOver" @drop="onDrop"><canvas ref="canvasEl"></canvas></div>
+  <div ref="hostEl" class="canvas-host" @dragover="onDragOver" @drop="onDrop"><canvas ref="canvasEl" tabindex="-1"></canvas></div>
 </template>
 
 <style scoped>
 .canvas-host { flex: 1; min-height: 0; position: relative; overflow: hidden; }
-canvas { display: block; width: 100%; height: 100%; }
+/* Focusable (tabindex, in the template) so litegraph's own canvas.focus() on pointer down actually
+   works and its keydown listener (bound to this element) receives Delete/Backspace; litegraph draws
+   its own selection outline, so the browser's default focus ring would be redundant chrome. */
+canvas { display: block; width: 100%; height: 100%; outline: none; }
 </style>
 
 <style>
