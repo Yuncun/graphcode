@@ -28,6 +28,8 @@ export interface WrapCache { text: string; width: number; lines: string[] }
 export function wrapLines(ctx: CanvasRenderingContext2D, text: string, width: number): string[] {
   const lines: string[] = [];
   for (const paragraph of text.split("\n")) {
+    // An empty paragraph (a blank line, or empty text) is always one blank output line.
+    if (paragraph === "") { lines.push(""); continue; }
     let line = "";
     for (const word of paragraph.split(" ")) {
       const candidate = line ? `${line} ${word}` : word;
@@ -35,14 +37,16 @@ export function wrapLines(ctx: CanvasRenderingContext2D, text: string, width: nu
       if (line) lines.push(line);
       let rest = word;
       while (rest && ctx.measureText(rest).width > width) {
-        let cut = rest.length - 1;
+        // At least one character per line, or a glyph wider than the box would never be consumed.
+        let cut = Math.max(1, rest.length - 1);
         while (cut > 1 && ctx.measureText(rest.slice(0, cut)).width > width) cut--;
         lines.push(rest.slice(0, cut));
         rest = rest.slice(cut);
       }
       line = rest;
     }
-    lines.push(line);
+    // A forced cut can consume a word exactly, leaving nothing to flush; only flush real leftover.
+    if (line) lines.push(line);
   }
   return lines;
 }

@@ -77,6 +77,12 @@ describe("wrapLines", () => {
     const { ctx } = fakeCtx(10);
     expect(wrapLines(ctx, "", 50)).toEqual([""]);
   });
+
+  it("always consumes at least one character per line, so a glyph wider than the box still terminates", () => {
+    const { ctx } = fakeCtx(10);
+    expect(wrapLines(ctx, "M", 5)).toEqual(["M"]);
+    expect(wrapLines(ctx, "MM x", 5)).toEqual(["M", "M", "x"]);
+  });
 });
 
 describe("cachedWrap", () => {
