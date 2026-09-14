@@ -11,6 +11,27 @@ import { serveStatic } from "./static.ts";
 
 export interface BridgeOptions { port: number; socketPath: string; distDir: string | null }
 
+/** Where `pnpm dev` serves the app from; it proxies /ws and /api through to the bridge. */
+const VITE_DEV_ORIGIN = "http://localhost:5173";
+
+/**
+ * WebSockets are exempt from the browser's same-origin policy, so without this check any page
+ * the developer happens to have open could open ws://localhost:4747/ws and send the daemon
+ * whatever it liked. Accept a handshake that carries no Origin at all (a non-browser client,
+ * such as a test), and otherwise only the bridge's own page or the Vite dev server. Checking
+ * Host as well closes DNS rebinding, where a name the attacker owns resolves to 127.0.0.1 and
+ * so reaches the bridge with an Origin of its own.
+ */
+export function acceptsHandshake(req: http.IncomingMessage, port: number): boolean {
+  const host = req.headers.host;
+  if (host !== `localhost:${port}` && host !== `127.0.0.1:${port}`) return false;
+  const origin = req.headers.origin;
+  return origin === undefined
+    || origin === `http://localhost:${port}`
+    || origin === `http://127.0.0.1:${port}`
+    || origin === VITE_DEV_ORIGIN;
+}
+
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -37,8 +58,10 @@ export async function startBridge(options: BridgeOptions): Promise<{ port: numbe
         res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(await readCanvas(project))); return;
       }
       if (req.method === "PUT") {
+        // A fixed message: the thrown error names the file it could not write, and that is a
+        // path on this machine that the caller has no business being told.
         try { await writeCanvas(project, JSON.parse(await readBody(req))); res.writeHead(204); res.end(); }
-        catch (error) { res.writeHead(400); res.end(String(error)); }
+        catch { res.writeHead(400, { "content-type": "application/json" }); res.end('{"error":"the canvas document could not be stored"}'); }
         return;
       }
       res.writeHead(405); res.end(); return;
@@ -46,7 +69,10 @@ export async function startBridge(options: BridgeOptions): Promise<{ port: numbe
     if (serveApp) { serveApp(req, res); return; }
     res.writeHead(404); res.end();
   });
-  const wss = new WebSocketServer({ server, path: "/ws" });
+  // The bound port is only known once `listen` has answered (callers pass 0 to take any free
+  // port), and the handshake check needs it, so it is read at handshake time rather than here.
+  let boundPort = options.port;
+  const wss = new WebSocketServer({ server, path: "/ws", verifyClient: ({ req }: { req: http.IncomingMessage }) => acceptsHandshake(req, boundPort) });
   attachRelay(wss, options.socketPath);
   await new Promise<void>((resolve, reject) => {
     // ws's WebSocketServer re-emits the underlying http.Server's "error" event on
@@ -65,6 +91,7 @@ export async function startBridge(options: BridgeOptions): Promise<{ port: numbe
   });
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : options.port;
+  boundPort = port;
   return {
     port,
     close: () => new Promise((resolve) => { for (const c of wss.clients) c.terminate(); wss.close(); server.close(() => resolve()); }),

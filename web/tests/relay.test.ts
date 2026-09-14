@@ -62,6 +62,25 @@ describe("bridge relay", () => {
     expect(bad.status).toBe(400);
   });
 
+  it("refuses a WebSocket from a page on another origin, and one addressed to another host", async () => {
+    daemon = await startFakeDaemon();
+    bridge = await startBridge({ port: 0, socketPath: daemon.path, distDir: null });
+
+    const refused = (options: WebSocket.ClientOptions) => new Promise<string>((resolve, reject) => {
+      const ws = new WebSocket(`ws://localhost:${bridge.port}/ws`, options);
+      ws.once("open", () => { ws.close(); reject(new Error("the bridge accepted the handshake")); });
+      ws.once("error", (error) => resolve(error.message));
+    });
+
+    expect(await refused({ origin: "http://evil.example" })).toMatch(/401/);
+    expect(await refused({ headers: { host: "graphcode.attacker.example" } })).toMatch(/401/);
+
+    // A client that sends no Origin at all, such as this test, is still let in.
+    const { ws } = await openSocket(bridge.port);
+    await waitFor(() => daemon.received.length === 1);
+    ws.close();
+  });
+
   it("rejects startBridge when the port is already in use, instead of crashing the process", async () => {
     blocker = net.createServer();
     const port = await new Promise<number>((resolve) => {

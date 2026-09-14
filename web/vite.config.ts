@@ -7,9 +7,11 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     port: 5173,
+    // changeOrigin rewrites the Host header to the bridge's own; the bridge refuses a
+    // WebSocket handshake addressed to any other host (see acceptsHandshake in server/main.ts).
     proxy: {
-      "/api": bridge,
-      "/ws": { target: bridge.replace("http", "ws"), ws: true },
+      "/api": { target: bridge, changeOrigin: true },
+      "/ws": { target: bridge.replace("http", "ws"), ws: true, changeOrigin: true },
     },
   },
   test: {
