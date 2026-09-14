@@ -24,8 +24,19 @@ describe("buildDraft", () => {
     expect("checkDescription" in d).toBe(false);
   });
 
-  it("refuses a toDraft that returns no loopType", () => {
-    expect(() => buildDraft(def(() => ({})), {}, "", "ID-3")).toThrow("t/t: toDraft returned no loopType");
+  it("refuses a toDraft that returns no object", () => {
+    expect(() => buildDraft(def(() => undefined as never), {}, "", "ID-3")).toThrow("t/t: toDraft returned no object");
+  });
+
+  it("refuses a toDraft whose loopType is missing or not a real LoopType", () => {
+    expect(() => buildDraft(def(() => ({})), {}, "", "ID-3")).toThrow('t/t: toDraft returned unknown loopType "undefined"');
+    expect(() => buildDraft(def(() => ({ loopType: "banana" }) as never), {}, "", "ID-4")).toThrow('t/t: toDraft returned unknown loopType "banana"');
+  });
+
+  it("keeps the caller's id and title even when toDraft's result includes its own", () => {
+    const d = buildDraft(def(() => ({ loopType: "sketch", id: "EVIL", title: "Evil" }) as never), {}, "Given Title", "ID-5");
+    expect(d.id).toBe("ID-5");
+    expect(d.title).toBe("Given Title");
   });
 });
 

@@ -1,4 +1,4 @@
-import type { GoalSpec, NodeDraft } from "../daemon/protocol.ts";
+import { LOOP_TYPES, type GoalSpec, type NodeDraft } from "../daemon/protocol.ts";
 import type { NodeTypeDef } from "./registry.ts";
 import type { WidgetValues } from "./widgets.ts";
 
@@ -16,9 +16,14 @@ function stripUndefined<T extends object>(value: T): T {
 
 /** Turns a node type's `toDraft` result into the complete NodeDraft the daemon decodes. */
 export function buildDraft(def: NodeTypeDef, values: WidgetValues, title: string, id = newNodeID()): NodeDraft {
-  const partial = stripUndefined(def.toDraft(values));
-  if (!partial.loopType) throw new Error(`${def.type}: toDraft returned no loopType`);
-  const draft: NodeDraft = { id, title: title.trim(), loopType: partial.loopType, pausesBeforeWritesOnly: false, ...partial };
+  const result = def.toDraft(values);
+  if (!result || typeof result !== "object") throw new Error(`${def.type}: toDraft returned no object`);
+  const partial = stripUndefined(result);
+  if (!partial.loopType || !LOOP_TYPES.includes(partial.loopType)) {
+    throw new Error(`${def.type}: toDraft returned unknown loopType "${String(partial.loopType)}"`);
+  }
+  // The caller's id and title always win over anything a module's toDraft happens to return.
+  const draft: NodeDraft = { pausesBeforeWritesOnly: false, ...partial, id, title: title.trim(), loopType: partial.loopType };
   if (partial.goal) draft.goal = { ...DEFAULT_GOAL, ...stripUndefined(partial.goal) } as GoalSpec;
   return draft;
 }

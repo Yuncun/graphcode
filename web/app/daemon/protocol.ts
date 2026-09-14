@@ -7,6 +7,7 @@ export type ModelTier = "fast" | "standard" | "capable";
 /** `CLISessionBackendKind` raw values. */
 export type BackendKind = "claudeCode" | "copilotCLI" | "codex" | "openCode" | "pi";
 
+export const LOOP_TYPES: readonly LoopType[] = ["sketch", "goalBased", "timeBased", "turnBased", "proactive"];
 export const MODEL_TIERS: readonly ModelTier[] = ["fast", "standard", "capable"];
 export const BACKENDS: readonly BackendKind[] = ["claudeCode", "copilotCLI", "codex", "openCode", "pi"];
 /** The words a human sees for each type; `sketch` and `proactive` are the on-disk names of Main and Composite. */
