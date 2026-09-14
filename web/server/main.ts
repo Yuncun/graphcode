@@ -59,47 +59,61 @@ export async function startBridge(options: BridgeOptions): Promise<{ port: numbe
     res.end(JSON.stringify(body));
   };
   const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", "http://localhost");
-    if (url.pathname === "/api/canvas") {
-      const project = projectFromQuery(req);
-      if (!project) { res.writeHead(400, { "content-type": "application/json" }); res.end('{"error":"project must be an absolute path to an existing directory"}'); return; }
-      if (req.method === "GET") {
-        res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(await readCanvas(project))); return;
+    try {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      if (url.pathname === "/api/canvas") {
+        const project = projectFromQuery(req);
+        if (!project) { res.writeHead(400, { "content-type": "application/json" }); res.end('{"error":"project must be an absolute path to an existing directory"}'); return; }
+        if (req.method === "GET") {
+          res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(await readCanvas(project))); return;
+        }
+        if (req.method === "PUT") {
+          // A fixed message: the thrown error names the file it could not write, and that is a
+          // path on this machine that the caller has no business being told.
+          try { await writeCanvas(project, JSON.parse(await readBody(req))); res.writeHead(204); res.end(); }
+          catch { res.writeHead(400, { "content-type": "application/json" }); res.end('{"error":"the canvas document could not be stored"}'); }
+          return;
+        }
+        res.writeHead(405); res.end(); return;
       }
-      if (req.method === "PUT") {
-        // A fixed message: the thrown error names the file it could not write, and that is a
-        // path on this machine that the caller has no business being told.
-        try { await writeCanvas(project, JSON.parse(await readBody(req))); res.writeHead(204); res.end(); }
-        catch { res.writeHead(400, { "content-type": "application/json" }); res.end('{"error":"the canvas document could not be stored"}'); }
+      if (url.pathname === "/api/nodes") {
+        if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
+        // `project` is optional here: with none, only the built-in and user packs are listed.
+        const project = projectFromQuery(req);
+        if (url.searchParams.has("project") && !project) { json(res, 400, { error: "project must be an absolute path to an existing directory" }); return; }
+        const types = await listNodeTypes(nodeTypeRoots, project);
+        const projectQuery = project ? `&project=${encodeURIComponent(project)}` : "";
+        json(res, 200, { types: types.map((t) => ({ ...t, url: `/api/nodes/file?source=${t.source}&type=${encodeURIComponent(t.type)}${projectQuery}` })) });
         return;
       }
-      res.writeHead(405); res.end(); return;
+      if (url.pathname === "/api/nodes/file") {
+        if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
+        const source = url.searchParams.get("source") as NodeTypeSource | null;
+        const type = url.searchParams.get("type") ?? "";
+        const project = projectFromQuery(req);
+        if (!source || !NODE_TYPE_SOURCES.includes(source) || (source === "project" && !project)) { json(res, 400, { error: "source must be builtin, user, or project (with a project path)" }); return; }
+        const file = await nodeTypeFile(nodeTypeRoots, project, source, type);
+        if (!file) { res.writeHead(404); res.end(); return; }
+        // Read before writing the header: `nodeTypeFile` only just stat'd the file, and it could
+        // be removed between that stat and this read (TOCTOU) — treat a failed read the same as
+        // a missing file rather than sending a 200 header we then can't back up with a body.
+        let body: Buffer;
+        try { body = await fs.promises.readFile(file); }
+        catch { res.writeHead(404); res.end(); return; }
+        // no-store: the browser imports each module through a fresh URL anyway, and an edited pack must never be served stale.
+        res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+        res.end(body);
+        return;
+      }
+      if (serveApp) { serveApp(req, res); return; }
+      res.writeHead(404); res.end();
+    } catch (error) {
+      console.error("graphcode-web:", error);
+      // Headers may already be on the wire (the /api/nodes/file body streamed, say); in that
+      // case the response can only be ended, not restarted with a fresh status.
+      if (!res.headersSent) { res.writeHead(500, { "content-type": "application/json" }); res.end('{"error":"the bridge could not handle the request"}'); }
+      else res.end();
     }
-    if (url.pathname === "/api/nodes") {
-      if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
-      // `project` is optional here: with none, only the built-in and user packs are listed.
-      const project = projectFromQuery(req);
-      if (url.searchParams.has("project") && !project) { json(res, 400, { error: "project must be an absolute path to an existing directory" }); return; }
-      const types = await listNodeTypes(nodeTypeRoots, project);
-      const projectQuery = project ? `&project=${encodeURIComponent(project)}` : "";
-      json(res, 200, { types: types.map((t) => ({ ...t, url: `/api/nodes/file?source=${t.source}&type=${encodeURIComponent(t.type)}${projectQuery}` })) });
-      return;
-    }
-    if (url.pathname === "/api/nodes/file") {
-      if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
-      const source = url.searchParams.get("source") as NodeTypeSource | null;
-      const type = url.searchParams.get("type") ?? "";
-      const project = projectFromQuery(req);
-      if (!source || !NODE_TYPE_SOURCES.includes(source) || (source === "project" && !project)) { json(res, 400, { error: "source must be builtin, user, or project (with a project path)" }); return; }
-      const file = await nodeTypeFile(nodeTypeRoots, project, source, type);
-      if (!file) { res.writeHead(404); res.end(); return; }
-      // no-store: the browser imports each module through a fresh URL anyway, and an edited pack must never be served stale.
-      res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
-      res.end(await fs.promises.readFile(file));
-      return;
-    }
-    if (serveApp) { serveApp(req, res); return; }
-    res.writeHead(404); res.end();
   });
   // The bound port is only known once `listen` has answered (callers pass 0 to take any free
   // port), and the handshake check needs it, so it is read at handshake time rather than here.

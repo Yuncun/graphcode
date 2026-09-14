@@ -95,4 +95,20 @@ describe("GET /api/nodes and /api/nodes/file", () => {
       await bridge.close();
     }
   });
+
+  it("answers 404, not a crash, when a listed file is removed before it is fetched", async () => {
+    const r = roots(); cleanup.push(r.dir);
+    const bridge = await startBridge({ port: 0, socketPath: path.join(r.dir, "absent.sock"), distDir: null, nodeTypeRoots: { builtin: r.builtin, user: r.user } });
+    try {
+      const base = `http://127.0.0.1:${bridge.port}`;
+      const before = (await (await fetch(`${base}/api/nodes`)).json()) as { types: Array<{ type: string; url: string }> };
+      const timed = before.types.find((t) => t.type === "agent/timed")!;
+      fs.rmSync(path.join(r.builtin, "agent", "timed.js"));
+      expect((await fetch(base + timed.url)).status).toBe(404);
+      const after = (await (await fetch(`${base}/api/nodes`)).json()) as { types: unknown[] };
+      expect(after.types).toHaveLength(before.types.length - 1);
+    } finally {
+      await bridge.close();
+    }
+  });
 });
