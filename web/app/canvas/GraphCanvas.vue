@@ -15,6 +15,8 @@ import { createSaveScheduler } from "./saveScheduler.ts";
 import { applyViewport, fitToNodes, readViewport, type Viewport } from "./viewport.ts";
 
 interface ProjectView {
+  /** The project path, so a save or a count is never keyed by a prop that may have moved on. */
+  project: string;
   adapter: GraphAdapter;
   layout: CanvasDoc;
   /** null until the first fit; then the last pan and zoom seen on this project. */
@@ -79,7 +81,7 @@ function viewFor(project: string): Promise<ProjectView> {
     view = getLayout(project).then((layout) => {
       const adapter = new GraphAdapter(new LGraph(), host);
       adapter.types = props.nodeTypes;
-      return { adapter, layout, viewport: null };
+      return { project, adapter, layout, viewport: null };
     });
     views.set(project, view);
     view.then((v) => resolved.set(project, v));
@@ -95,7 +97,7 @@ function counts(view: ProjectView): DocumentCounts {
 function changed(): void {
   const view = shown;
   if (!view) return;
-  saves.schedule(props.graph.project.path);
+  saves.schedule(view.project);
   emit("documentChanged", counts(view));
 }
 
@@ -204,7 +206,8 @@ onMounted(async () => {
     const ids = Object.keys(selected);
     emit("select", ids.length === 1 ? ids[0]! : null);
   };
-  // The editor sits over its field; pan and zoom move the field, so it is placed again once per frame.
+  // The editor sits over its field. litegraph draws a frame whenever the canvas is dirty, and a pan
+  // or zoom marks it dirty, so placing the editor again on every drawn frame keeps it on its field.
   canvas.onDrawForeground = () => editor?.reposition();
   // The Delete key. litegraph would remove every selected node; `block_delete` on the cards makes
   // that a no-op, so this decides instead: a draft goes at once, a live card is the daemon's.
@@ -236,6 +239,9 @@ onMounted(async () => {
     // renderLinks' type also covers a drag to/from a subgraph boundary node, which this app never
     // shows; every real drag here starts and ends on an LGraphNode card.
     const request = linkRequestFrom(canvas.linkConnector.renderLinks as unknown as DraggedLink[], event.detail.node);
+    // A wire being moved off an input still holds its old link: litegraph only lets go of it inside
+    // the drop code that preventDefault skipped. Let go of it here, or a move would duplicate the wire.
+    canvas.linkConnector.disconnectLinks();
     if (request) draftLink(request);
   });
   // Picking a wire off its input. A draft wire is the user's to move or drop (litegraph carries
@@ -284,7 +290,7 @@ defineExpose({
   adapter: (project: string) => resolved.get(project)?.adapter,
   /** App changed a project's document through its adapter (a start, a load): save and recount. */
   touch: (project: string) => {
-    if (shown && props.graph.project.path === project) changed();
+    if (shown && shown.project === project) changed();
     else saves.schedule(project);
   },
   cards: (project: string) => resolved.get(project)?.adapter.cards().map((c) => ({ id: String(c.id), mode: c.cardMode, title: c.title, values: { ...c.values }, pos: [c.pos[0], c.pos[1]] as [number, number], size: [c.size[0], c.size[1]] as [number, number] })),

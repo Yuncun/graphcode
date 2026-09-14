@@ -10,7 +10,7 @@ const LINE_PX = 15;
 
 /**
  * The one text editor for every field on every card: a textarea or input placed over the field's box
- * and kept in step with pan and zoom by `reposition()`, which the canvas calls once per frame. It
+ * and kept in step with pan and zoom by `reposition()`, which the canvas calls on every frame it draws. It
  * commits on blur, on Enter for a single-line field and ⌘/Ctrl+Enter for a multiline one, and
  * discards on Escape. Its key events never reach litegraph, so Delete inside the editor deletes text.
  */
