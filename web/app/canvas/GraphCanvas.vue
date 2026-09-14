@@ -6,8 +6,9 @@ import type { LoopGraph } from "../daemon/protocol.ts";
 import { GraphAdapter, type CanvasDoc } from "./adapter.ts";
 import { getLayout, putLayout } from "./layoutClient.ts";
 import { createSaveScheduler } from "./saveScheduler.ts";
+import { applyViewport, fitToNodes, readViewport, type Viewport } from "./viewport.ts";
 
-interface ProjectView { adapter: GraphAdapter; layout: CanvasDoc }
+interface ProjectView { adapter: GraphAdapter; layout: CanvasDoc; /** null until the first fit; then the last pan and zoom seen on this project. */ viewport: Viewport | null }
 
 const SAVE_DELAY_MS = 500;
 /**
@@ -32,11 +33,13 @@ const resolved = new Map<string, ProjectView>();
 const saves = createSaveScheduler({ delayMs: SAVE_DELAY_MS, save });
 /** Counts show() calls, so a slow one cannot put its project back on screen after a newer one. */
 let shows = 0;
+/** The view whose graph the canvas is drawing, so its pan and zoom can be saved when the tab changes. */
+let shown: ProjectView | null = null;
 
 function viewFor(project: string): Promise<ProjectView> {
   let view = views.get(project);
   if (!view) {
-    view = getLayout(project).then((layout) => ({ adapter: new GraphAdapter(new LGraph()), layout }));
+    view = getLayout(project).then((layout) => ({ adapter: new GraphAdapter(new LGraph()), layout, viewport: null }));
     views.set(project, view);
     view.then((v) => resolved.set(project, v));
   }
@@ -48,7 +51,21 @@ async function show(graph: LoopGraph): Promise<void> {
   const view = await viewFor(graph.project.path);
   view.adapter.sync(graph, view.layout);
   if (token !== shows || !canvas) return;
-  if (canvas.graph !== view.adapter.lgraph) canvas.setGraph(view.adapter.lgraph);
+  if (canvas.graph !== view.adapter.lgraph) {
+    // litegraph keeps one pan and zoom per canvas, not per graph, so carry them by hand.
+    if (shown) shown.viewport = readViewport(canvas.ds);
+    canvas.setGraph(view.adapter.lgraph);
+    shown = view;
+    if (view.viewport) applyViewport(canvas.ds, view.viewport);
+  }
+  // First time this project has cards on screen: bring them all into view. litegraph only
+  // measures a card's boundingRect once per render frame, so a card just added by sync() above
+  // still reads as zero-sized until computeVisibleNodes() (normally run inside the render loop)
+  // has measured it at least once.
+  if (!view.viewport && view.adapter.lgraph.nodes.length) {
+    canvas.computeVisibleNodes();
+    if (fitToNodes(canvas, view.adapter.lgraph.nodes)) view.viewport = readViewport(canvas.ds);
+  }
   canvas.setDirty(true, true);
 }
 
@@ -79,6 +96,7 @@ onMounted(async () => {
   if (!element) return;
   // The constructor starts litegraph's render loop; stopRendering() below pairs with it.
   canvas = new LGraphCanvas(element, view.adapter.lgraph);
+  shown = view;
   canvas.allow_searchbox = false;
   canvas.show_info = false;
   canvas.ds.offset = [...VIEW_MARGIN];
