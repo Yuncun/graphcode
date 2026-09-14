@@ -12,7 +12,17 @@ const types: Record<string, string> = {
 export function serveStatic(distDir: string) {
   return (req: IncomingMessage, res: ServerResponse): void => {
     const url = new URL(req.url ?? "/", "http://localhost");
-    const requested = path.normalize(decodeURIComponent(url.pathname));
+    // The URL parser keeps a stray "%" in a pathname (GET /%) and decodeURIComponent throws on
+    // it. This runs inside the bridge's async request handler, where the throw would become an
+    // unhandled rejection and take the whole process down, so answer the bad request here.
+    let requested: string;
+    try {
+      requested = path.normalize(decodeURIComponent(url.pathname));
+    } catch {
+      res.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
+      res.end("bad request: the path is not a valid percent-encoded string");
+      return;
+    }
     let file = path.join(distDir, requested);
     if (!file.startsWith(distDir)) { res.writeHead(403); res.end(); return; }
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(distDir, "index.html");

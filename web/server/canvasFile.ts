@@ -13,7 +13,9 @@ export function canvasFilePath(projectPath: string): string {
 export async function readCanvas(projectPath: string): Promise<CanvasDoc> {
   try {
     const parsed = JSON.parse(await fs.readFile(canvasFilePath(projectPath), "utf8"));
-    if (parsed && parsed.version === 1 && typeof parsed.nodes === "object") return parsed as CanvasDoc;
+    // `typeof null === "object"`, and a null `nodes` reaches placement as a saved layout and
+    // throws there, so the document has to carry a real object before it counts as one.
+    if (parsed && parsed.version === 1 && parsed.nodes && typeof parsed.nodes === "object") return parsed as CanvasDoc;
     return empty();
   } catch {
     return empty();

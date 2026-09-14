@@ -18,6 +18,11 @@ describe("canvas file", () => {
     expect(await readCanvas(project)).toEqual(doc);
   });
 
+  it("treats a document whose nodes are null as empty", async () => {
+    fs.writeFileSync(path.join(project, ".graphcode", "canvas.json"), '{"version":1,"nodes":null}');
+    expect(await readCanvas(project)).toEqual({ version: 1, nodes: {} });
+  });
+
   it("treats a corrupt file as empty", async () => {
     fs.writeFileSync(path.join(project, ".graphcode", "canvas.json"), "{not json");
     expect(await readCanvas(project)).toEqual({ version: 1, nodes: {} });
