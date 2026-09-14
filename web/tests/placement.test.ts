@@ -48,7 +48,7 @@ describe("placeNodes", () => {
   });
   it("spaces columns and rows for the 300-wide card", () => {
     expect(COLUMN_STEP).toBe(340);
-    expect(ROW_STEP).toBe(220);
+    expect(ROW_STEP).toBe(500);
   });
   it("terminates on a two-node cycle, placing both nodes with at most one of them in column 40", () => {
     const pos = placeNodes(g(["A", "B"], [["A", "B"], ["B", "A"]]), {});

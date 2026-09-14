@@ -2,7 +2,7 @@ import { emptyCanvasDoc, readCanvasDoc, type CanvasDoc } from "./document.ts";
 
 const url = (project: string) => `/api/canvas?project=${encodeURIComponent(project)}`;
 
-/** The bridge answers with an empty document for a project that has never been laid out; a version 1 file is read as version 2. */
+/** The bridge answers with an empty document for a project that has never been laid out; a version 1 file, a phase 1 layout, is laid out afresh. */
 export async function getLayout(project: string): Promise<CanvasDoc> {
   const res = await fetch(url(project));
   if (!res.ok) return emptyCanvasDoc();

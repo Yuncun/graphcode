@@ -50,23 +50,26 @@ function readEdge(raw: unknown): EdgeRecord | null {
   return { from: raw.from, to: raw.to, kind: raw.kind as EdgeKind, condition: raw.condition as EdgeCondition };
 }
 
-/** Reads a version 1 or 2 document into a fresh version 2 one, dropping entries that are not well formed. Anything else is the empty document. */
+/**
+ * Reads a version 2 document, dropping entries that are not well formed. A version 1 file — a
+ * phase 1 layout, made for cards a third as tall — is not read at all: its positions would overlap
+ * phase 2's taller cards, so it yields the empty document and phase 2's placement lays the cards
+ * out afresh. Anything else is also the empty document.
+ */
 export function readCanvasDoc(raw: unknown): CanvasDoc {
   const doc = emptyCanvasDoc();
-  if (!isObject(raw) || (raw.version !== 1 && raw.version !== 2) || !isObject(raw.nodes)) return doc;
+  if (!isObject(raw) || raw.version !== 2 || !isObject(raw.nodes)) return doc;
   for (const [id, node] of Object.entries(raw.nodes)) {
     const placed = readPlaced(node);
     if (placed) doc.nodes[id] = placed;
   }
-  if (raw.version === 2) {
-    if (isObject(raw.drafts)) {
-      for (const [id, record] of Object.entries(raw.drafts)) {
-        const r = readRecord(record);
-        if (r) doc.drafts[id] = r;
-      }
+  if (isObject(raw.drafts)) {
+    for (const [id, record] of Object.entries(raw.drafts)) {
+      const r = readRecord(record);
+      if (r) doc.drafts[id] = r;
     }
-    if (Array.isArray(raw.draftEdges)) doc.draftEdges = raw.draftEdges.map(readEdge).filter((e): e is EdgeRecord => e !== null);
   }
+  if (Array.isArray(raw.draftEdges)) doc.draftEdges = raw.draftEdges.map(readEdge).filter((e): e is EdgeRecord => e !== null);
   return doc;
 }
 

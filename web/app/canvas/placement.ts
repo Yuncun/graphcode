@@ -4,8 +4,8 @@ export const COLUMN_X = 40;
 export const ROW_Y = 40;
 /** 300-wide card plus a 40 gap. */
 export const COLUMN_STEP = 340;
-/** tallest common card (5 rows, 152) plus the 30 title bar plus a gap. */
-export const ROW_STEP = 220;
+/** The tallest common card (a turn loop, about 460 px with its title bar) plus a gap. */
+export const ROW_STEP = 500;
 
 /**
  * Saved positions win. Otherwise a node's column sits one step right of its longest-chain

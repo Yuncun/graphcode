@@ -68,7 +68,9 @@ canvas and it becomes a draft card at once, with its inputs on it: a title, the 
 prompt, done check, model, backend, …), a Start button and a status line. Nothing is sent. Text fields
 open an editor over themselves (⌘Enter or Enter keeps the text, Escape drops it); model, backend,
 interval and toggles are litegraph's own widgets. Cards drag and resize; position, size, drafts and
-draft wires are saved in `<project>/.graphcode/canvas.json` (version 2).
+draft wires are saved in `<project>/.graphcode/canvas.json` (version 2). A layout saved by phase 1
+(version 1) is laid out afresh the first time phase 2 opens the project; its positions were made
+for cards a third as tall.
 
 Drag from a card's output slot (handoff, on success, on failure, message, spawn) onto another card to
 draw a wire. Every wire is a draft until Start. Start on a card sends its `createNode` and then

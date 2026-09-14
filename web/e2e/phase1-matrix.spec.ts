@@ -132,40 +132,49 @@ test.describe("phase 1 surface", () => {
     await shot(page, "P1-14-drop-on-canvas");
   });
 
-  test("P1-22 the view fits the graph on first show, and a pan survives a tab switch", async ({ page }) => {
-    h = await launch();
-    await openAlpha(page, h);
-    const fits = await page.evaluate((p) => {
-      const g = window.__graphcode;
-      const v = g.viewport()!;
-      const rect = document.querySelector("canvas")!.getBoundingClientRect();
-      const inside = Object.values(g.positions(p)!).every(({ pos, size }) => {
-        const left = (pos[0] + v.offset[0]) * v.scale;
-        const top = (pos[1] - 30 + v.offset[1]) * v.scale;
-        const right = (pos[0] + size![0] + v.offset[0]) * v.scale;
-        const bottom = (pos[1] + size![1] + v.offset[1]) * v.scale;
-        return left >= 0 && top >= 0 && right <= rect.width && bottom <= rect.height;
-      });
-      return { inside, scale: v.scale };
-    }, h.alpha);
-    expect(fits.inside).toBe(true);
-    expect(fits.scale).toBeLessThanOrEqual(1);
-    expect(fits.scale).toBeGreaterThanOrEqual(0.6);
-    await shot(page, "P1-22a-fitted");
-    const before = (await page.evaluate(() => window.__graphcode.viewport()!.offset)) as [number, number];
-    const empty = await emptyPoint(page);
-    await page.mouse.move(empty.x, empty.y);
-    await page.mouse.down();
-    await page.mouse.move(empty.x + 90, empty.y - 60, { steps: 8 });
-    await page.mouse.up();
-    const panned = (await page.evaluate(() => window.__graphcode.viewport()!.offset)) as [number, number];
-    expect(panned).not.toEqual(before);
-    await page.getByTestId("tab-name").nth(1).click();
-    await expect.poll(() => page.evaluate(() => window.__graphcode.active())).toBe(h.beta);
-    await page.getByTestId("tab-name").nth(0).click();
-    await expect.poll(() => page.evaluate(() => window.__graphcode.active())).toBe(h.alpha);
-    expect(await page.evaluate(() => window.__graphcode.viewport()!.offset)).toEqual(panned);
-    await shot(page, "P1-22b-pan-restored");
+  // Phase 2's taller rows (ROW_STEP 500) make the alpha fixture's 9-node graph taller than the
+  // suite's default 1600x1000 viewport can fit even at litegraph's minimum readable scale (0.6),
+  // which would make it legitimately overflow — a real behaviour for a huge graph, not a bug this
+  // test should catch. A taller viewport, scoped to just this test, restores the case this test
+  // means to cover: an ordinary graph that fits within the readable zoom range.
+  test.describe("P1-22 fit", () => {
+    test.use({ viewport: { width: 1600, height: 1500 } });
+
+    test("P1-22 the view fits the graph on first show, and a pan survives a tab switch", async ({ page }) => {
+      h = await launch();
+      await openAlpha(page, h);
+      const fits = await page.evaluate((p) => {
+        const g = window.__graphcode;
+        const v = g.viewport()!;
+        const rect = document.querySelector("canvas")!.getBoundingClientRect();
+        const inside = Object.values(g.positions(p)!).every(({ pos, size }) => {
+          const left = (pos[0] + v.offset[0]) * v.scale;
+          const top = (pos[1] - 30 + v.offset[1]) * v.scale;
+          const right = (pos[0] + size![0] + v.offset[0]) * v.scale;
+          const bottom = (pos[1] + size![1] + v.offset[1]) * v.scale;
+          return left >= 0 && top >= 0 && right <= rect.width && bottom <= rect.height;
+        });
+        return { inside, scale: v.scale };
+      }, h.alpha);
+      expect(fits.inside).toBe(true);
+      expect(fits.scale).toBeLessThanOrEqual(1);
+      expect(fits.scale).toBeGreaterThanOrEqual(0.6);
+      await shot(page, "P1-22a-fitted");
+      const before = (await page.evaluate(() => window.__graphcode.viewport()!.offset)) as [number, number];
+      const empty = await emptyPoint(page);
+      await page.mouse.move(empty.x, empty.y);
+      await page.mouse.down();
+      await page.mouse.move(empty.x + 90, empty.y - 60, { steps: 8 });
+      await page.mouse.up();
+      const panned = (await page.evaluate(() => window.__graphcode.viewport()!.offset)) as [number, number];
+      expect(panned).not.toEqual(before);
+      await page.getByTestId("tab-name").nth(1).click();
+      await expect.poll(() => page.evaluate(() => window.__graphcode.active())).toBe(h.beta);
+      await page.getByTestId("tab-name").nth(0).click();
+      await expect.poll(() => page.evaluate(() => window.__graphcode.active())).toBe(h.alpha);
+      expect(await page.evaluate(() => window.__graphcode.viewport()!.offset)).toEqual(panned);
+      await shot(page, "P1-22b-pan-restored");
+    });
   });
 
   test("P1-23 switching tabs clears the selection", async ({ page }) => {

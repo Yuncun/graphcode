@@ -6,9 +6,9 @@ const card = (id: string, x: number, y: number, size?: [number, number]): CardSn
 });
 
 describe("readCanvasDoc", () => {
-  it("reads a version 1 file as version 2 with no drafts", () => {
+  it("lays a version 1 file out afresh: its phase 1 positions are dropped", () => {
     expect(readCanvasDoc({ version: 1, nodes: { A: { pos: [1, 2], size: [300, 200] }, B: { pos: [3, 4] } } }))
-      .toEqual({ version: 2, nodes: { A: { pos: [1, 2], size: [300, 200] }, B: { pos: [3, 4] } }, drafts: {}, draftEdges: [] });
+      .toEqual(emptyCanvasDoc());
   });
 
   it("reads a version 2 file, dropping entries that are not well formed", () => {
