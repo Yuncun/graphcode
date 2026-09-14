@@ -178,6 +178,15 @@ treats a broken extension.
 
 ## 8. Testing and review
 
+Standing rule (Eric, 2026-09-13): every phase's plan ends with a UI test matrix task. The matrix lists
+every control and every visible state the phase adds or touches, one row each, and each row gets a
+browser test. Rows that depend on daemon state run against the fake daemon (`web/tests/fakeDaemon.ts`)
+with a fixture graph that shows every loop state, loop type and edge condition at once, and save a
+screenshot per row under `web/e2e/out/`, so the whole surface is seen on every run, not only what the
+live daemon happens to be doing. Phase 0 shipped without this; phase 1's plan starts with the matrix
+for the phase 0 surface (tabs, close, open by path, drag and reload, daemon down at boot, daemon lost
+mid-session, all nine card states).
+
 - Bridge: unit tests for framing, relay and registry loading (`node --test`).
 - Web app: Playwright smoke against the fork daemon: boot, open the TwoDrive project, drag a node type
   from the library, link two nodes, assert the daemon graph gained a node and an edge via the CLI,
