@@ -50,6 +50,8 @@ connection.onStatus((s) => {
 
 const names = computed(() => Object.fromEntries(store.order.map((p) => [p, store.projects.get(p)?.project.name ?? p])));
 const activeGraph = computed(() => (active.value ? store.projects.get(active.value) ?? null : null));
+/** The active project once the daemon has actually confirmed it: null for the built-ins-only case, and never a path the daemon rejected (openProject sets `active` before that answer arrives). */
+const confirmedProject = computed(() => activeGraph.value?.project.path ?? null);
 const lastError = computed(() => store.errors[store.errors.length - 1] ?? "");
 
 /** Drop the tab only once the daemon has been told, so the view cannot disagree with the daemon. */
@@ -70,25 +72,21 @@ function openProject(path: string) {
 
 async function reloadNodeTypes() {
   const load = ++nodeTypeLoads;
-  const project = active.value;
+  const project = confirmedProject.value;
   nodeTypesLoading.value = true;
   try {
     const entries = await loadNodeTypes(project);
     if (load === nodeTypeLoads) nodeTypes.value = entries;
   } catch (error) {
-    // openProject sets `active` to the path it asked for before the daemon confirms it: a
-    // path the daemon then rejects never joins store.order, and its own errorOccurred already
-    // told the user why, so this listing failure (its project query 400s) must not overwrite
-    // that message in the footer with a less specific one.
-    if (project === null || store.order.includes(project)) {
-      store.pushError(error instanceof Error ? error.message : String(error));
-    }
+    if (load === nodeTypeLoads) store.pushError(error instanceof Error ? error.message : String(error));
   } finally {
     if (load === nodeTypeLoads) nodeTypesLoading.value = false;
   }
 }
-// A project's own pack can shadow a built-in, so the list follows the active tab.
-watch(active, () => { void reloadNodeTypes(); }, { immediate: true });
+// A project's own pack can shadow a built-in, so the list follows the project the daemon has
+// confirmed, not the tab the user merely asked for: a path the daemon rejects (never reaching
+// activeGraph) never asks the bridge for a listing, so its own errorOccurred is what the footer shows.
+watch(confirmedProject, () => { void reloadNodeTypes(); }, { immediate: true });
 
 onMounted(() => {
   (window as unknown as { __graphcode: unknown }).__graphcode = {
