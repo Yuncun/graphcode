@@ -26,6 +26,8 @@ let canvas: LGraphCanvas | null = null;
  * view, so two shows of the same project cannot race into building two graphs for it.
  */
 const views = new Map<string, Promise<ProjectView>>();
+/** Views whose layout has loaded; the debug hooks read from here because they cannot await. */
+const resolved = new Map<string, ProjectView>();
 /** Debounced per project, so a move in one project cannot cancel another's pending write. */
 const saves = createSaveScheduler({ delayMs: SAVE_DELAY_MS, save });
 /** Counts show() calls, so a slow one cannot put its project back on screen after a newer one. */
@@ -36,6 +38,7 @@ function viewFor(project: string): Promise<ProjectView> {
   if (!view) {
     view = getLayout(project).then((layout) => ({ adapter: new GraphAdapter(new LGraph()), layout }));
     views.set(project, view);
+    view.then((v) => resolved.set(project, v));
   }
   return view;
 }
@@ -96,7 +99,11 @@ watch(() => props.graph, (graph, previous) => {
  * App.vue closes a project that is not the one on screen without the watch above ever firing,
  * so it calls this: write the move the user made just before closing, and drop the timer with it.
  */
-defineExpose({ flushSave: (project: string) => saves.flush(project) });
+defineExpose({
+  flushSave: (project: string) => saves.flush(project),
+  positions: (project: string) => resolved.get(project)?.adapter.positions().nodes,
+  viewport: () => canvas ? { scale: canvas.ds.scale, offset: [canvas.ds.offset[0], canvas.ds.offset[1]] as [number, number], width: canvas.canvas.width, height: canvas.canvas.height } : undefined,
+});
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", fit);

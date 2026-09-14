@@ -59,7 +59,13 @@ function openProject(path: string) {
 }
 
 onMounted(() => {
-  (window as unknown as { __graphcode: unknown }).__graphcode = { store, openProject };
+  (window as unknown as { __graphcode: unknown }).__graphcode = {
+    store,
+    openProject,
+    active: () => active.value,
+    positions: (project: string) => canvasView.value?.positions(project),
+    viewport: () => canvasView.value?.viewport(),
+  };
   connection.open();
 });
 </script>
@@ -68,8 +74,8 @@ onMounted(() => {
   <main class="shell">
     <ProjectTabs :paths="store.order" :names="names" :active="active" @select="active = $event" @close="closeProject" @open="openProject" />
     <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" />
-    <div v-else class="empty">{{ status === "open" ? "No open projects. Press + to open a folder." : "Connecting to graphcoded…" }}</div>
-    <footer class="status">{{ status }}<span v-if="lastError" class="error"> · {{ lastError }}</span></footer>
+    <div v-else class="empty" data-testid="empty">{{ status === "open" ? "No open projects. Press + to open a folder." : "Connecting to graphcoded…" }}</div>
+    <footer class="status" data-testid="status">{{ status }}<span v-if="lastError" class="error"> · {{ lastError }}</span></footer>
   </main>
 </template>
 

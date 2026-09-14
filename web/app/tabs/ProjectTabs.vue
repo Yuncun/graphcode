@@ -12,13 +12,13 @@ function openByPath() {
   <nav class="tabs">
     <!-- Each tab is a plain container holding two real buttons, so both the project and its
          close control are keyboard focusable. A button cannot legally contain another button. -->
-    <div v-for="path in paths" :key="path" class="tab" :class="{ active: path === active }" :title="path">
-      <button class="name" :aria-current="path === active ? 'true' : undefined" @click="emit('select', path)">
+    <div v-for="path in paths" :key="path" class="tab" :class="{ active: path === active }" :title="path" data-testid="tab">
+      <button class="name" data-testid="tab-name" :aria-current="path === active ? 'true' : undefined" @click="emit('select', path)">
         {{ names[path] ?? path }}
       </button>
-      <button class="close" aria-label="Close project" @click="emit('close', path)">×</button>
+      <button class="close" data-testid="tab-close" aria-label="Close project" @click="emit('close', path)">×</button>
     </div>
-    <button class="tab add" title="Open a project folder" @click="openByPath">+</button>
+    <button class="tab add" data-testid="tab-add" title="Open a project folder" @click="openByPath">+</button>
   </nav>
 </template>
 
