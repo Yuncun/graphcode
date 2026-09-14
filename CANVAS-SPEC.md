@@ -119,7 +119,8 @@ canvas file per project at `<project>/.graphcode/canvas.json` (the kit already u
 `groups` and `notes` that exist only on the canvas. A node the daemon reports without a position gets
 one from a simple placement rule (to the right of its nearest upstream node, else the next free slot),
 which is the only "auto layout" in version 1; an explicit Arrange command can come later. A node
-missing from the daemon is dropped from the file on next save.
+missing from the daemon is dropped from the file on next save. Phase 2 (section 11) makes the file version 2:
+it also holds the drafts and draft wires, which exist nowhere else.
 
 ## 6. Node types in JavaScript
 
@@ -175,10 +176,10 @@ is a later phase.
 |---|---|
 | Project tabs | Open projects from the daemon. Closing a tab sends `closeProject`. The graph inside a tab is that project's live graph. |
 | Canvas | ComfyUI interactions: drag to pan, wheel to zoom, drag a slot to link, double-click for the search box, right-click for the litegraph context menu. Cards show title, state pill, live line, type and age, drawn by the node adapter from the daemon's node. Clicking a card selects it and opens its terminal tab. Right-click menus and the search box are off until their items send daemon commands (phase 1 ruling 2). |
-| Nodes tab | Tree of node types by category with search. Drag onto the canvas creates a node with default widget values; the inspector opens for the brief. Create is sent to the daemon only when the brief is confirmed, because a goal loop starts on creation (finding 19). Version 1 pack: agent/goal, agent/timed, agent/main, agent/turn, group/composite; project pack over user pack over built-in on the same name. |
-| Workflows tab | Recent projects, open by path, and saved graphs (exported bundles). |
+| Nodes tab | Tree of node types by category with search. Drag onto the canvas creates a node with default widget values; the inspector opens for the brief. Create is sent to the daemon only when the brief is confirmed, because a goal loop starts on creation (finding 19). Version 1 pack: agent/goal, agent/timed, agent/main, agent/turn, group/composite; project pack over user pack over built-in on the same name. Phase 2: the drop makes a draft card with its inputs on it (section 11). |
+| Workflows tab | Recent projects, open by path, and saved graphs (exported bundles). Phase 2: saved workflow files (section 11); recent projects move to a Projects tab. |
 | Templates tab | The kit's template files. Dragging one onto the canvas creates a node with the template's settings. Composite templates come in phase 2 through `importNodes`. |
-| Inspector | Brief of the selected node, read-only in phase 1, with Rename; its edges with kind, condition and a delete each; actions Stop, Restart, Detach from template, Delete. |
+| Inspector | Brief of the selected node, read-only in phase 1, with Rename; its edges with kind, condition and a delete each; actions Stop, Restart, Detach from template, Delete. Removed in phase 2: the card carries its inputs and buttons (section 11). |
 | Bottom panel | Terminal per opened node (xterm.js attached to the zmx session), plus the project's Mailroom. |
 | Attention | A count of loops needing a human in the tab strip, and an orange glow on the card, as today. |
 
@@ -207,7 +208,8 @@ mid-session, all nine card states). Phase 1 shipped both matrices: `web/e2e/phas
 |---|---|---|
 | 0 | Read-only canvas: bridge relays the live graph, litegraph draws it with positions persisted; project tabs | none |
 | 1 | Editing: node library with drag, links to edges, delete, inspector, create with brief confirmation | none |
-| 2 | Bottom panel: terminal per node, Mailroom; Templates tab; composite import | none |
+| 2 | The canvas is the document: inputs on the card, drafts, Start, workflow files (section 11) | none |
+| 2b | Bottom panel: terminal per node, Mailroom; Templates tab; composite import | none |
 | 3 | Daemon command `startSession(nodeID)` so attended loops work from the web; `script` node kind that runs `node <file>` with inputs on stdin and captures outputs; deterministic node pack | two commands in GraphcodeKit |
 | later | Native window (WKWebView shell in the Swift app) if a browser tab proves annoying; Arrange command; worktree creation | maybe |
 
@@ -220,3 +222,40 @@ mid-session, all nine card states). Phase 1 shipped both matrices: `web/e2e/phas
 
 Field names in the node-type example (section 6) follow `NodeDraft` in GraphcodeKit; the implementation
 plan pins them after reading `GraphcodeKit/Sources/Domain/NodeDraft.swift`.
+
+## 11. Phase 2: the canvas is the document (2026-09-14)
+
+Phase 1 mirrored the daemon: every gesture was a request, and a card appeared only when the daemon
+echoed it. Phase 2 flips that, the way ComfyUI works: the canvas is a document the user edits freely,
+and the daemon is an overlay on it. It is the proof of concept for the product finding that creation
+conflates authoring with running.
+
+- **Inputs on the card.** Each card shows a title field and its node type's widgets (goal or prompt,
+  done check, model, backend, …) drawn on the card by litegraph. A draft's are editable in place: text
+  fields open the one shared editor over the field; combo, number and toggle are litegraph's own
+  widgets. A live card's are read-only except the title, which sends `renameNode`. Cards drag and
+  resize (a multiline field takes the room a resize gives); position and size are saved.
+- **Drafts.** Dropping a node type makes a draft card at once; nothing is sent. Draft wires are drawn
+  from any card's output onto any card and kept locally. Drafts and draft wires live in canvas.json
+  (version 2) so a reload keeps them.
+- **Start.** A Start button on a draft card sends its `createNode`, then `createEdge` for each draft
+  wire whose ends are live or just sent. A toolbar Start sends every draft in one go. A card is
+  "starting" until the daemon echoes its id, then it is live; an `errorOccurred` while a start is in
+  flight, or 10 s of silence, returns the starting cards to draft with the error in the footer. A goal
+  loop still runs the moment the daemon has it (finding 19); Start is the moment the user chooses.
+- **Delete and actions.** The Delete key removes a draft outright and asks before sending `deleteNode`
+  for a live card. Dragging a wire off its input removes a draft wire outright and asks before sending
+  `deleteEdge` for a live edge. Stop and Restart are buttons on a live card. The right-hand inspector
+  and Detach from template are gone.
+- **Workflow file.** Save writes every card (live ones through the type's `fromLoop`) and every wire to
+  `~/.graphcode/workflows/<name>.json`. The Workflows tab lists those files and loads one onto the
+  current project as drafts with fresh ids, one column to the right of what is there. Recent projects
+  move to a Projects tab.
+
+Node type modules gain an optional `fromLoop(node)` returning widget values for a live loop. A live
+loop's type is the built-in for its `loopType` (goalBased → agent/goal, timeBased → agent/timed,
+sketch → agent/main, turnBased → agent/turn, proactive → group/composite), subject to the usual pack
+precedence, so a user pack that overrides `agent/goal` draws every live goal loop.
+
+Not in phase 2: litegraph's context menus and search box (still off), collapse and colour, a minimap,
+and the engine changes (edges gating start, a done state, reopening a resolved loop).
