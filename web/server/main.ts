@@ -6,13 +6,17 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { attachRelay } from "./relay.ts";
 import { readCanvas, writeCanvas } from "./canvasFile.ts";
+import { defaultNodeTypeRoots, listNodeTypes, NODE_TYPE_SOURCES, nodeTypeFile, type NodeTypeRoots, type NodeTypeSource } from "./nodeTypes.ts";
 import { resolveSocketPath } from "./socketPath.ts";
 import { serveStatic } from "./static.ts";
 
-export interface BridgeOptions { port: number; socketPath: string; distDir: string | null }
+export interface BridgeOptions { port: number; socketPath: string; distDir: string | null; /** Default: the repo's `web/nodes` and `~/.graphcode/nodes`. */ nodeTypeRoots?: NodeTypeRoots }
 
 /** Where `pnpm dev` serves the app from; it proxies /ws and /api through to the bridge. */
 const VITE_DEV_ORIGIN = "http://localhost:5173";
+
+/** The built-in pack ships in the repo next to `server/`. */
+const BUILTIN_NODES_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "nodes");
 
 /**
  * WebSockets are exempt from the browser's same-origin policy, so without this check any page
@@ -49,6 +53,11 @@ function projectFromQuery(req: http.IncomingMessage): string | null {
 
 export async function startBridge(options: BridgeOptions): Promise<{ port: number; close(): Promise<void> }> {
   const serveApp = options.distDir ? serveStatic(options.distDir) : null;
+  const nodeTypeRoots = options.nodeTypeRoots ?? defaultNodeTypeRoots(BUILTIN_NODES_DIR);
+  const json = (res: http.ServerResponse, status: number, body: unknown) => {
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (url.pathname === "/api/canvas") {
@@ -65,6 +74,29 @@ export async function startBridge(options: BridgeOptions): Promise<{ port: numbe
         return;
       }
       res.writeHead(405); res.end(); return;
+    }
+    if (url.pathname === "/api/nodes") {
+      if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
+      // `project` is optional here: with none, only the built-in and user packs are listed.
+      const project = projectFromQuery(req);
+      if (url.searchParams.has("project") && !project) { json(res, 400, { error: "project must be an absolute path to an existing directory" }); return; }
+      const types = await listNodeTypes(nodeTypeRoots, project);
+      const projectQuery = project ? `&project=${encodeURIComponent(project)}` : "";
+      json(res, 200, { types: types.map((t) => ({ ...t, url: `/api/nodes/file?source=${t.source}&type=${encodeURIComponent(t.type)}${projectQuery}` })) });
+      return;
+    }
+    if (url.pathname === "/api/nodes/file") {
+      if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
+      const source = url.searchParams.get("source") as NodeTypeSource | null;
+      const type = url.searchParams.get("type") ?? "";
+      const project = projectFromQuery(req);
+      if (!source || !NODE_TYPE_SOURCES.includes(source) || (source === "project" && !project)) { json(res, 400, { error: "source must be builtin, user, or project (with a project path)" }); return; }
+      const file = await nodeTypeFile(nodeTypeRoots, project, source, type);
+      if (!file) { res.writeHead(404); res.end(); return; }
+      // no-store: the browser imports each module through a fresh URL anyway, and an edited pack must never be served stale.
+      res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+      res.end(await fs.promises.readFile(file));
+      return;
     }
     if (serveApp) { serveApp(req, res); return; }
     res.writeHead(404); res.end();

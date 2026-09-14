@@ -51,6 +51,7 @@ export async function launch({ daemonUp = true, before }: LaunchOptions = {}): P
     port: 0,
     socketPath: daemon?.path ?? path.join(root, "absent.sock"),
     distDir: path.join(WEB_ROOT, "dist"),
+    nodeTypeRoots: { builtin: path.join(WEB_ROOT, "nodes"), user: dirs.userNodesDir },
   });
   return {
     ...dirs,
