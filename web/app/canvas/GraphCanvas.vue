@@ -29,6 +29,8 @@ const SAVE_DELAY_MS = 500;
  * the view started exactly at the corner of the graph. Start it a little way in instead.
  */
 const VIEW_MARGIN: [number, number] = [24, LiteGraph.NODE_TITLE_HEIGHT + 24];
+/** GraphCanvas does not yet drive card interaction (Task 6): a card built here never needs a real host. */
+const STUB_HOST = { onChanged() {}, onAction() {}, onEditField() {}, onRename() {} };
 
 const props = defineProps<{ graph: LoopGraph }>();
 const emit = defineEmits<{
@@ -56,7 +58,7 @@ let shown: ProjectView | null = null;
 function viewFor(project: string): Promise<ProjectView> {
   let view = views.get(project);
   if (!view) {
-    view = getLayout(project).then((layout) => ({ adapter: new GraphAdapter(new LGraph()), layout, viewport: null, pending: new Map() }));
+    view = getLayout(project).then((layout) => ({ adapter: new GraphAdapter(new LGraph(), STUB_HOST), layout, viewport: null, pending: new Map() }));
     views.set(project, view);
     view.then((v) => resolved.set(project, v));
   }
@@ -89,9 +91,7 @@ async function show(graph: LoopGraph): Promise<void> {
 async function save(project: string): Promise<void> {
   const view = await views.get(project);
   if (!view) return;
-  // positions() only ever reports layout, so only `nodes` is refreshed here; drafts and draft
-  // wires (version 2) are not something the adapter knows about yet (Task 5).
-  view.layout = { ...view.layout, nodes: mergeReserved(view.adapter.positions(), view.pending).nodes };
+  view.layout = { ...view.layout, nodes: view.adapter.document().nodes };
   try {
     await putLayout(project, view.layout);
   } catch (error) {
@@ -205,7 +205,7 @@ watch(() => props.graph, (graph, previous) => {
  */
 defineExpose({
   flushSave: (project: string) => saves.flush(project),
-  positions: (project: string) => resolved.get(project)?.adapter.positions().nodes,
+  positions: (project: string) => resolved.get(project)?.adapter.document().nodes,
   viewport: () => canvas ? { scale: canvas.ds.scale, offset: [canvas.ds.offset[0], canvas.ds.offset[1]] as [number, number], width: canvas.canvas.width, height: canvas.canvas.height } : undefined,
   reserveLayout,
 });

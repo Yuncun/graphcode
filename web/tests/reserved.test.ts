@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mergeReserved, RESERVE_TTL_MS, type Reservation } from "../app/canvas/reserved.ts";
 
-const doc = () => ({ version: 1 as const, nodes: { A: { pos: [1, 2] as [number, number] } } });
+const doc = () => ({ version: 2 as const, nodes: { A: { pos: [1, 2] as [number, number] } }, drafts: {}, draftEdges: [] });
 
 describe("mergeReserved", () => {
   it("writes a live reservation, forgets one whose card exists, drops one that expired", () => {

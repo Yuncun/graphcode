@@ -1,4 +1,4 @@
-import type { CanvasDoc } from "./adapter.ts";
+import type { CanvasDoc } from "./document.ts";
 
 export interface Reservation { pos: [number, number]; at: number }
 
