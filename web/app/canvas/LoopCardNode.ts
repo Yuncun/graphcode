@@ -1,6 +1,6 @@
 import { LGraphBadge, LGraphNode, LiteGraph, type Size } from "@comfyorg/litegraph";
 import type { EdgeCondition, EdgeKind, LoopNode, LoopStateName, LoopType } from "../daemon/protocol.ts";
-import { stateName } from "../daemon/protocol.ts";
+import { LOOP_TYPE_LABEL, stateName } from "../daemon/protocol.ts";
 import { ageLabel } from "./time.ts";
 import { liveLine } from "./liveLine.ts";
 
@@ -30,7 +30,6 @@ export function cardHeight(inputCount: number): number {
   return LiteGraph.NODE_SLOT_HEIGHT * Math.max(OUTPUT_SLOTS.length, inputCount) + TEXT_BLOCK;
 }
 
-const typeLabel: Record<LoopType, string> = { sketch: "Main", goalBased: "Goal", timeBased: "Timed", turnBased: "Turn", proactive: "Composite" };
 const typeColor: Record<LoopType, string> = { sketch: "#8a8f99", goalBased: "#2f8f6b", timeBased: "#b8860b", turnBased: "#8a5cc7", proactive: "#3b7dd8" };
 const stateColor: Record<LoopStateName, string> = {
   idle: "#6b7079", running: "#3b82f6", awaitingInput: "#f59e0b", blocked: "#f59e0b", succeeded: "#22c55e",
@@ -97,7 +96,7 @@ export class LoopCardNode extends LGraphNode {
     const state = stateName(node);
     this.badges = [new LGraphBadge({ text: stateWord[state] ?? state, bgColor: stateColor[state] ?? "#6b7079", fgColor: "#ffffff" })];
     this.live = liveLine(node);
-    this.meta = `${typeLabel[node.loopType] ?? node.loopType} · ${ageLabel(node.createdAt)}${node.modelTier ? " · " + node.modelTier : ""}`;
+    this.meta = `${LOOP_TYPE_LABEL[node.loopType] ?? node.loopType} · ${ageLabel(node.createdAt)}${node.modelTier ? " · " + node.modelTier : ""}`;
     this.setDirtyCanvas(true, true);
   }
 

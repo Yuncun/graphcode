@@ -1,0 +1,53 @@
+import type { GoalSpec, NodeDraft } from "../daemon/protocol.ts";
+import type { NodeTypeDef } from "./registry.ts";
+import type { WidgetValues } from "./widgets.ts";
+
+/** The GoalSpec defaults the daemon would apply; sent explicitly so the wire shape is always complete. */
+export const DEFAULT_GOAL: Omit<GoalSpec, "summary" | "predicate"> = { pollIntervalSeconds: 60, metricDirection: "maximize", skipsUnchangedWorkspace: false };
+
+/** Upper-case, the form Foundation writes, so the id the daemon echoes matches the one the layout was saved under. */
+export function newNodeID(): string {
+  return crypto.randomUUID().toUpperCase();
+}
+
+function stripUndefined<T extends object>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as T;
+}
+
+/** Turns a node type's `toDraft` result into the complete NodeDraft the daemon decodes. */
+export function buildDraft(def: NodeTypeDef, values: WidgetValues, title: string, id = newNodeID()): NodeDraft {
+  const partial = stripUndefined(def.toDraft(values));
+  if (!partial.loopType) throw new Error(`${def.type}: toDraft returned no loopType`);
+  const draft: NodeDraft = { id, title: title.trim(), loopType: partial.loopType, pausesBeforeWritesOnly: false, ...partial };
+  if (partial.goal) draft.goal = { ...DEFAULT_GOAL, ...stripUndefined(partial.goal) } as GoalSpec;
+  return draft;
+}
+
+/** Mirrors `NodeDraft.isValid` in GraphcodeKit, so the form refuses what the daemon would refuse, with a reason. */
+export function draftProblems(draft: NodeDraft): string[] {
+  const problems: string[] = [];
+  switch (draft.loopType) {
+    case "goalBased":
+      if (!draft.goal?.summary?.trim()) problems.push("A goal loop needs a goal.");
+      break;
+    case "timeBased": {
+      const prompt = (draft.triggerPrompt ?? "").trim();
+      if (!prompt) problems.push("A timed loop needs a prompt.");
+      if (draft.heartbeatIntervalSeconds !== undefined) {
+        if (!(Number.isFinite(draft.heartbeatIntervalSeconds) && draft.heartbeatIntervalSeconds > 0)) problems.push("The interval must be a positive number of seconds.");
+      } else if (!/\/(loop|schedule)\b/.test(prompt)) {
+        problems.push("Give an interval, or put a /loop directive in the prompt.");
+      }
+      break;
+    }
+    case "turnBased":
+      if (!draft.firstInstruction?.trim()) problems.push("A turn loop needs a first instruction.");
+      break;
+    case "proactive":
+      if (!draft.title.trim()) problems.push("A composite needs a name.");
+      break;
+    case "sketch":
+      break;
+  }
+  return problems;
+}

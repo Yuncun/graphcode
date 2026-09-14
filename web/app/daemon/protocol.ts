@@ -4,8 +4,27 @@ export type LoopStateName = "idle" | "running" | "awaitingInput" | "blocked" | "
 export type EdgeKind = "handoff" | "message" | "spawn";
 export type EdgeCondition = "always" | "onSuccess" | "onFailure";
 export type ModelTier = "fast" | "standard" | "capable";
+/** `CLISessionBackendKind` raw values. */
+export type BackendKind = "claudeCode" | "copilotCLI" | "codex" | "openCode" | "pi";
+
+export const MODEL_TIERS: readonly ModelTier[] = ["fast", "standard", "capable"];
+export const BACKENDS: readonly BackendKind[] = ["claudeCode", "copilotCLI", "codex", "openCode", "pi"];
+/** The words a human sees for each type; `sketch` and `proactive` are the on-disk names of Main and Composite. */
+export const LOOP_TYPE_LABEL: Record<LoopType, string> = { sketch: "Main", goalBased: "Goal", timeBased: "Timed", turnBased: "Turn", proactive: "Composite" };
 
 export interface ProjectRef { path: string; name: string; lastOpenedAt?: number }
+
+/** `GoalSpec` as the daemon decodes it. Every field but `summary` has a default there, but the app always sends the full shape. */
+export interface GoalSpec {
+  summary: string;
+  predicate?: string;
+  pollIntervalSeconds: number;
+  stallAfterSeconds?: number;
+  metricCommand?: string;
+  metricDirection: "maximize" | "minimize";
+  tokenBudget?: number;
+  skipsUnchangedWorkspace: boolean;
+}
 
 export interface LoopNode {
   id: string;
@@ -18,16 +37,17 @@ export interface LoopNode {
   pilotState: string;
   modelTier?: ModelTier;
   backend?: string;
-  goal?: { summary: string; predicate?: string };
+  goal?: Partial<GoalSpec> & { summary: string };
   triggerPrompt?: string;
+  heartbeatIntervalSeconds?: number;
   firstInstruction?: string;
+  checkDescription?: string;
   activity?: string;
   stallReason?: string;
   summary?: unknown;
   presence?: { presence: string; confidence: string };
   usage?: { inputTokens: number; outputTokens: number; reportedAt: number };
   subGraph?: LoopGraph;
-  checkDescription?: string;
   createdFromTemplateID?: string;
   /** Present on a loop that follows a template file; absent on a snapshot or a loop made by hand. */
   templateFollow?: Record<string, unknown>;
@@ -51,6 +71,38 @@ export interface LoopGraph {
   edges: LoopEdge[];
 }
 
+/** `NodeDraft` (GraphcodeKit/Sources/Domain/NodeDraft.swift). The daemon keeps `id`, so the app can place the card before the node is reported. */
+export interface NodeDraft {
+  id: string;
+  title: string;
+  loopType: LoopType;
+  checkDescription?: string;
+  triggerPrompt?: string;
+  heartbeatIntervalSeconds?: number;
+  firstInstruction?: string;
+  pausesBeforeWritesOnly: boolean;
+  goal?: GoalSpec;
+  backend?: BackendKind;
+  modelTier?: ModelTier;
+}
+
+/** `EdgeSpec` with the payload transform the plain edge editor never sets: `{"none":{}}` is Swift's encoding of `.none`. */
+export interface EdgeSpec { kind: EdgeKind; condition: EdgeCondition; payloadTransform: { none: Record<string, never> } }
+
+export function edgeSpec(kind: EdgeKind, condition: EdgeCondition): EdgeSpec {
+  return { kind, condition, payloadTransform: { none: {} } };
+}
+
+export type GraphCommand =
+  | { createNode: { _0: NodeDraft } }
+  | { createEdge: { from: string; to: string; spec: EdgeSpec } }
+  | { deleteNode: { _0: string } }
+  | { deleteEdge: { _0: string } }
+  | { renameNode: { _0: string; title: string } }
+  | { stopNode: { _0: string } }
+  | { restartNode: { _0: string } }
+  | { detachTemplate: { _0: string } };
+
 export type DaemonEvent =
   | { recentProjectsListed: { _0: ProjectRef[] } }
   | { graphChanged: { _0: LoopGraph } }
@@ -62,7 +114,12 @@ export type DaemonCommand =
   | { listRecentProjects: Record<string, never> }
   | { restoreOpenProjects: Record<string, never> }
   | { openProject: { path: string } }
-  | { closeProject: { path: string } };
+  | { closeProject: { path: string } }
+  | { graphCommand: { projectPath: string; command: GraphCommand } };
+
+export function graphCommand(projectPath: string, command: GraphCommand): DaemonCommand {
+  return { graphCommand: { projectPath, command } };
+}
 
 export function stateName(node: LoopNode): LoopStateName {
   return (Object.keys(node.state)[0] ?? "idle") as LoopStateName;
