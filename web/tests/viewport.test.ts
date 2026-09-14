@@ -64,6 +64,11 @@ describe("fitToNodes", () => {
     expect((-20 + wide.ds.offset[0]) * wide.ds.scale).toBe(0);
     // Vertical centring is untouched: the row is 150 tall plus padding, centred in 900 / 0.6.
     expect(wide.ds.offset[1]).toBeCloseTo(-(-20) - 270 / 2 + 900 / FIT_MIN_SCALE / 2, 5);
+    // A graph taller than the view at the floor shows its top row, not its middle.
+    const tall = fakeCanvas(1400, 900);
+    expect(fitToNodes(tall as never, [card(40, 40), card(40, 3000)])).toBe(true);
+    expect(tall.ds.scale).toBe(FIT_MIN_SCALE);
+    expect((-20 + tall.ds.offset[1]) * tall.ds.scale).toBe(0);
     // A graph that fits keeps the centred placement.
     const fits = fakeCanvas(1400, 900);
     fitToNodes(fits as never, [card(40, 40), card(1000, 40)]);

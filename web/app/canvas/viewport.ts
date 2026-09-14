@@ -29,9 +29,10 @@ export function fitToNodes(canvas: { ds: Scaler; setDirty(fg: boolean, bg: boole
     // litegraph draws boxes without text.
     canvas.ds.scale = FIT_MIN_SCALE;
     canvas.ds.fitToBounds(bounds, { zoom: 0 });
-    // Recentring a graph wider than the view hides its start on the left. A pipeline reads left
-    // to right, so when the left edge would land off screen, show the start instead of the middle.
+    // Recentring a graph wider or taller than the view hides its start. A pipeline reads left to
+    // right and top to bottom, so when an edge would land off screen, show the start instead of the middle.
     if ((bounds[0] + canvas.ds.offset[0]!) * canvas.ds.scale < 0) canvas.ds.offset[0] = -bounds[0];
+    if ((bounds[1] + canvas.ds.offset[1]!) * canvas.ds.scale < 0) canvas.ds.offset[1] = -bounds[1];
   }
   canvas.setDirty(true, true);
   return true;
