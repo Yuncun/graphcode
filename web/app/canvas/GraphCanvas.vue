@@ -4,7 +4,8 @@ import { LGraph, LGraphCanvas, LiteGraph } from "@comfyorg/litegraph";
 import "@comfyorg/litegraph/style.css";
 import type { LoopGraph } from "../daemon/protocol.ts";
 import { NODE_TYPE_MIME } from "../sidebar/library.ts";
-import { GraphAdapter, type CanvasDoc } from "./adapter.ts";
+import { GraphAdapter } from "./adapter.ts";
+import type { CanvasDoc } from "./document.ts";
 import { getLayout, putLayout } from "./layoutClient.ts";
 import { linkRequestFrom, type DraggedLink, type LinkRequest } from "./linkRequest.ts";
 import { onUserLinkDrop } from "./LoopCardNode.ts";
@@ -88,7 +89,9 @@ async function show(graph: LoopGraph): Promise<void> {
 async function save(project: string): Promise<void> {
   const view = await views.get(project);
   if (!view) return;
-  view.layout = mergeReserved(view.adapter.positions(), view.pending);
+  // positions() only ever reports layout, so only `nodes` is refreshed here; drafts and draft
+  // wires (version 2) are not something the adapter knows about yet (Task 5).
+  view.layout = { ...view.layout, nodes: mergeReserved(view.adapter.positions(), view.pending).nodes };
   try {
     await putLayout(project, view.layout);
   } catch (error) {

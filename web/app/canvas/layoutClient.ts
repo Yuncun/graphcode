@@ -1,12 +1,12 @@
-import type { CanvasDoc } from "./adapter.ts";
+import { emptyCanvasDoc, readCanvasDoc, type CanvasDoc } from "./document.ts";
 
 const url = (project: string) => `/api/canvas?project=${encodeURIComponent(project)}`;
 
-/** The bridge answers with an empty document for a project that has never been laid out. */
+/** The bridge answers with an empty document for a project that has never been laid out; a version 1 file is read as version 2. */
 export async function getLayout(project: string): Promise<CanvasDoc> {
   const res = await fetch(url(project));
-  if (!res.ok) return { version: 1, nodes: {} };
-  return (await res.json()) as CanvasDoc;
+  if (!res.ok) return emptyCanvasDoc();
+  return readCanvasDoc(await res.json());
 }
 
 export async function putLayout(project: string, doc: CanvasDoc): Promise<void> {

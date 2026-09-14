@@ -66,7 +66,7 @@ describe("bridge relay", () => {
     bridge = await startBridge({ port: 0, socketPath: daemon.path, distDir: null });
     const project = fs.mkdtempSync(path.join(os.tmpdir(), "gcw-proj-"));
     const url = `http://localhost:${bridge.port}/api/canvas?project=${encodeURIComponent(project)}`;
-    expect(await (await fetch(url)).json()).toEqual({ version: 1, nodes: {} });
+    expect(await (await fetch(url)).json()).toEqual({ version: 2, nodes: {}, drafts: {}, draftEdges: [] });
     const doc = { version: 1, nodes: { "N-1": { pos: [1, 2] } } };
     const put = await fetch(url, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(doc) });
     expect(put.status).toBe(204);

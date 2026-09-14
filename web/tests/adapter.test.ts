@@ -17,12 +17,12 @@ describe("GraphAdapter", () => {
   it("mirrors nodes and edges, then removes what the daemon dropped", () => {
     const lgraph = new LGraph();
     const adapter = new GraphAdapter(lgraph);
-    adapter.sync(g([n("A"), n("B"), n("C")], [["A", "B", "handoff"], ["A", "C", "message"], ["B", "C", "handoff"]]), { version: 1, nodes: {} });
+    adapter.sync(g([n("A"), n("B"), n("C")], [["A", "B", "handoff"], ["A", "C", "message"], ["B", "C", "handoff"]]), { nodes: {} });
     expect(lgraph.nodes.map((x) => x.id).sort()).toEqual(["A", "B", "C"]);
     expect(lgraph.links.size).toBe(3);
     const c = lgraph.getNodeById("C")!;
     expect(c.inputs.map((i) => i.name)).toEqual(["message", "handoff"]);
-    adapter.sync(g([n("A"), n("B", "B renamed")], [["A", "B", "handoff"]]), { version: 1, nodes: {} });
+    adapter.sync(g([n("A"), n("B", "B renamed")], [["A", "B", "handoff"]]), { nodes: {} });
     expect(lgraph.nodes.map((x) => x.id).sort()).toEqual(["A", "B"]);
     expect(lgraph.links.size).toBe(1);
     expect(lgraph.getNodeById("B")!.title).toBe("B renamed");
@@ -31,7 +31,7 @@ describe("GraphAdapter", () => {
   it("refuses a link a user drags between two cards", () => {
     const lgraph = new LGraph();
     const adapter = new GraphAdapter(lgraph);
-    adapter.sync(g([n("A"), n("B")], [["A", "B", "handoff"]]), { version: 1, nodes: {} });
+    adapter.sync(g([n("A"), n("B")], [["A", "B", "handoff"]]), { nodes: {} });
     const a = lgraph.getNodeById("A") as LoopCardNode;
     const b = lgraph.getNodeById("B") as LoopCardNode;
     b.addInput("handoff", "handoff");
@@ -43,7 +43,7 @@ describe("GraphAdapter", () => {
     const lgraph = new LGraph();
     const adapter = new GraphAdapter(lgraph);
     const graph = g([n("A"), n("B")], [["A", "B", "handoff"]]);
-    adapter.sync(graph, { version: 1, nodes: {} });
+    adapter.sync(graph, { nodes: {} });
     const a = lgraph.getNodeById("A") as LoopCardNode;
     const b = lgraph.getNodeById("B") as LoopCardNode;
     b.addInput("message", "message");
@@ -52,7 +52,7 @@ describe("GraphAdapter", () => {
     expect(connectAsAdapter(() => a.connect(3, b, b.inputs.length - 1))).not.toBe(null);
     expect(lgraph.links.size).toBe(2);
 
-    adapter.sync(graph, { version: 1, nodes: {} });
+    adapter.sync(graph, { nodes: {} });
     expect(lgraph.links.size).toBe(1);
     expect([...lgraph.links.values()][0]!.origin_slot).toBe(0);
     expect(b.inputs.map((i) => i.name)).toEqual(["handoff"]);
@@ -61,7 +61,7 @@ describe("GraphAdapter", () => {
   it("applies saved positions and reports current ones", () => {
     const lgraph = new LGraph();
     const adapter = new GraphAdapter(lgraph);
-    adapter.sync(g([n("A")], []), { version: 1, nodes: { A: { pos: [123, 456] } } });
+    adapter.sync(g([n("A")], []), { nodes: { A: { pos: [123, 456] } } });
     expect([...lgraph.getNodeById("A")!.pos]).toEqual([123, 456]);
     expect(adapter.positions().nodes.A?.pos).toEqual([123, 456]);
   });
@@ -71,15 +71,15 @@ describe("GraphAdapter", () => {
     const adapter = new GraphAdapter(lgraph);
     const base: Omit<LoopGraph, "edges"> = { id: "G", revision: 1, project: { path: "/p", name: "p" }, nodes: [n("A"), n("B"), n("C")] };
 
-    adapter.sync({ ...base, edges: [{ id: "E0", from: "A", to: "B", kind: "handoff", condition: "always", fireCount: 0 }] }, { version: 1, nodes: {} });
+    adapter.sync({ ...base, edges: [{ id: "E0", from: "A", to: "B", kind: "handoff", condition: "always", fireCount: 0 }] }, { nodes: {} });
     expect(lgraph.links.size).toBe(1);
     expect([...lgraph.links.values()][0]!.color).toBe("#cfd3d8");
 
-    adapter.sync({ ...base, edges: [{ id: "E0", from: "A", to: "B", kind: "handoff", condition: "onFailure", fireCount: 0 }] }, { version: 1, nodes: {} });
+    adapter.sync({ ...base, edges: [{ id: "E0", from: "A", to: "B", kind: "handoff", condition: "onFailure", fireCount: 0 }] }, { nodes: {} });
     expect(lgraph.links.size).toBe(1);
     expect([...lgraph.links.values()][0]!.color).toBe("#ef4444");
 
-    adapter.sync({ ...base, edges: [{ id: "E0", from: "A", to: "C", kind: "handoff", condition: "onFailure", fireCount: 0 }] }, { version: 1, nodes: {} });
+    adapter.sync({ ...base, edges: [{ id: "E0", from: "A", to: "C", kind: "handoff", condition: "onFailure", fireCount: 0 }] }, { nodes: {} });
     expect(lgraph.links.size).toBe(1);
     expect([...lgraph.links.values()][0]!.target_id).toBe("C");
   });
@@ -89,7 +89,7 @@ describe("GraphAdapter", () => {
     const adapter = new GraphAdapter(lgraph);
     adapter.sync(g([n("A"), n("B"), n("C"), n("D"), n("E"), n("F")], [
       ["A", "B", "handoff"], ["A", "C", "handoff", "onSuccess"], ["A", "D", "handoff", "onFailure"], ["A", "E", "message"], ["A", "F", "spawn"],
-    ]), { version: 1, nodes: {} });
+    ]), { nodes: {} });
     const slots = [...lgraph.links.values()].sort((x, y) => String(x.target_id).localeCompare(String(y.target_id))).map((l) => l.origin_slot);
     expect(slots).toEqual([0, 1, 2, 3, 4]);
   });
@@ -97,9 +97,9 @@ describe("GraphAdapter", () => {
   it("moves an edge to another output slot when its condition changes", () => {
     const lgraph = new LGraph();
     const adapter = new GraphAdapter(lgraph);
-    adapter.sync(g([n("A"), n("B")], [["A", "B", "handoff", "always"]]), { version: 1, nodes: {} });
+    adapter.sync(g([n("A"), n("B")], [["A", "B", "handoff", "always"]]), { nodes: {} });
     expect([...lgraph.links.values()][0]!.origin_slot).toBe(0);
-    adapter.sync(g([n("A"), n("B")], [["A", "B", "handoff", "onFailure"]]), { version: 1, nodes: {} });
+    adapter.sync(g([n("A"), n("B")], [["A", "B", "handoff", "onFailure"]]), { nodes: {} });
     expect(lgraph.links.size).toBe(1);
     expect([...lgraph.links.values()][0]!.origin_slot).toBe(2);
     expect([...lgraph.links.values()][0]!.color).toBe("#ef4444");
@@ -109,11 +109,11 @@ describe("GraphAdapter", () => {
     const lgraph = new LGraph();
     const adapter = new GraphAdapter(lgraph);
     const many = g([n("A"), n("B"), n("C"), n("D"), n("E"), n("F"), n("G"), n("Z")], [["A", "Z", "handoff"], ["B", "Z", "handoff"], ["C", "Z", "handoff"], ["D", "Z", "handoff"], ["E", "Z", "handoff"], ["F", "Z", "handoff"], ["G", "Z", "handoff"]]);
-    adapter.sync(many, { version: 1, nodes: {} });
+    adapter.sync(many, { nodes: {} });
     const z = lgraph.getNodeById("Z")!;
     expect(z.inputs).toHaveLength(7);
     expect(z.size[1]).toBe(cardHeight(7));
-    adapter.sync(g([n("A"), n("Z")], [["A", "Z", "handoff"]]), { version: 1, nodes: {} });
+    adapter.sync(g([n("A"), n("Z")], [["A", "Z", "handoff"]]), { nodes: {} });
     expect(z.inputs).toHaveLength(1);
     expect(z.size[1]).toBe(cardHeight(1));
   });

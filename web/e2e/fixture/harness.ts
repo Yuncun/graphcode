@@ -7,7 +7,7 @@ import { startBridge } from "../../server/main.ts";
 import { alphaGraph, betaGraph } from "./graph.ts";
 import { startScriptedDaemon, type ScriptedDaemon } from "./scriptedDaemon.ts";
 
-export interface HarnessDirs { alpha: string; beta: string; gamma: string; userNodesDir: string }
+export interface HarnessDirs { alpha: string; beta: string; gamma: string; userNodesDir: string; workflowsDir: string }
 
 export interface Harness extends HarnessDirs {
   url: string;
@@ -34,6 +34,7 @@ export async function launch({ daemonUp = true, before }: LaunchOptions = {}): P
     // Listed in recents but never created, so opening it is the daemon's "no project" error.
     gamma: path.join(root, "gamma"),
     userNodesDir: path.join(root, "user-nodes"),
+    workflowsDir: path.join(root, "workflows"),
   };
   for (const d of [dirs.alpha, dirs.beta, dirs.userNodesDir]) fs.mkdirSync(d, { recursive: true });
   before?.(dirs);
@@ -52,6 +53,7 @@ export async function launch({ daemonUp = true, before }: LaunchOptions = {}): P
     socketPath: daemon?.path ?? path.join(root, "absent.sock"),
     distDir: path.join(WEB_ROOT, "dist"),
     nodeTypeRoots: { builtin: path.join(WEB_ROOT, "nodes"), user: dirs.userNodesDir },
+    workflowsDir: dirs.workflowsDir,
   });
   return {
     ...dirs,

@@ -9,8 +9,18 @@ import { readCanvas, writeCanvas } from "./canvasFile.ts";
 import { defaultNodeTypeRoots, listNodeTypes, NODE_TYPE_SOURCES, nodeTypeFile, type NodeTypeRoots, type NodeTypeSource } from "./nodeTypes.ts";
 import { resolveSocketPath } from "./socketPath.ts";
 import { serveStatic } from "./static.ts";
+import { defaultWorkflowsDir, listWorkflows, readWorkflow, writeWorkflow } from "./workflowFiles.ts";
+import { WORKFLOW_NAME } from "../shared/workflowName.ts";
 
-export interface BridgeOptions { port: number; socketPath: string; distDir: string | null; /** Default: the repo's `web/nodes` and `~/.graphcode/nodes`. */ nodeTypeRoots?: NodeTypeRoots }
+export interface BridgeOptions {
+  port: number;
+  socketPath: string;
+  distDir: string | null;
+  /** Default: the repo's `web/nodes` and `~/.graphcode/nodes`. */
+  nodeTypeRoots?: NodeTypeRoots;
+  /** Default: `~/.graphcode/workflows`. */
+  workflowsDir?: string;
+}
 
 /** Where `pnpm dev` serves the app from; it proxies /ws and /api through to the bridge. */
 const VITE_DEV_ORIGIN = "http://localhost:5173";
@@ -63,6 +73,7 @@ async function projectFromQuery(req: http.IncomingMessage): Promise<string | nul
 export async function startBridge(options: BridgeOptions): Promise<{ port: number; close(): Promise<void> }> {
   const serveApp = options.distDir ? serveStatic(options.distDir) : null;
   const nodeTypeRoots = options.nodeTypeRoots ?? defaultNodeTypeRoots(BUILTIN_NODES_DIR);
+  const workflowsDir = options.workflowsDir ?? defaultWorkflowsDir();
   const json = (res: http.ServerResponse, status: number, body: unknown) => {
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
@@ -118,6 +129,28 @@ export async function startBridge(options: BridgeOptions): Promise<{ port: numbe
         res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
         res.end(body);
         return;
+      }
+      if (url.pathname === "/api/workflows") {
+        if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
+        json(res, 200, { workflows: await listWorkflows(workflowsDir) });
+        return;
+      }
+      if (url.pathname === "/api/workflows/file") {
+        const name = url.searchParams.get("name") ?? "";
+        if (!WORKFLOW_NAME.test(name)) { json(res, 400, { error: "name must be 1 to 64 letters, digits, spaces, _ - or ., not starting with a space or a dot" }); return; }
+        if (req.method === "GET") {
+          const file = await readWorkflow(workflowsDir, name);
+          if (file === null) { res.writeHead(404); res.end(); return; }
+          json(res, 200, file);
+          return;
+        }
+        if (req.method === "PUT") {
+          // A fixed message: the thrown error could name a path on this machine.
+          try { await writeWorkflow(workflowsDir, name, JSON.parse(await readBody(req))); res.writeHead(204); res.end(); }
+          catch { json(res, 400, { error: "the workflow could not be stored" }); }
+          return;
+        }
+        res.writeHead(405); res.end(); return;
       }
       if (serveApp) { serveApp(req, res); return; }
       res.writeHead(404); res.end();

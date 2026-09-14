@@ -18,7 +18,7 @@ export class GraphAdapter {
     registerLoopCardNode();
   }
 
-  sync(graph: LoopGraph, layout: CanvasDoc): void {
+  sync(graph: LoopGraph, layout: { nodes: Record<string, { pos: [number, number] }> }): void {
     const positions = placeNodes(graph, layout.nodes);
     const wanted = new Set(graph.nodes.map((n) => n.id));
 
