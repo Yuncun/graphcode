@@ -53,6 +53,22 @@ describe("fitToNodes", () => {
     expect(huge.calls).toEqual([{ zoom: FIT_ZOOM }, { zoom: 0 }]);
     expect(huge.ds.scale).toBe(FIT_MIN_SCALE);
   });
+
+  it("shows the start of a graph that is wider than the view at the floor, not its middle", () => {
+    const wide = fakeCanvas(1400, 900);
+    // Cards from x 40 to x 3300 (bounds start at -20 with the padding): far wider than 1400 / 0.6.
+    expect(fitToNodes(wide as never, [card(40, 40), card(3000, 40)])).toBe(true);
+    expect(wide.ds.scale).toBe(FIT_MIN_SCALE);
+    // The padded left edge sits exactly at the left of the view.
+    expect(wide.ds.offset[0]).toBe(20);
+    expect((-20 + wide.ds.offset[0]) * wide.ds.scale).toBe(0);
+    // Vertical centring is untouched: the row is 150 tall plus padding, centred in 900 / 0.6.
+    expect(wide.ds.offset[1]).toBeCloseTo(-(-20) - 270 / 2 + 900 / FIT_MIN_SCALE / 2, 5);
+    // A graph that fits keeps the centred placement.
+    const fits = fakeCanvas(1400, 900);
+    fitToNodes(fits as never, [card(40, 40), card(1000, 40)]);
+    expect((-20 + fits.ds.offset[0]) * fits.ds.scale).toBeGreaterThan(0);
+  });
 });
 
 describe("readViewport / applyViewport", () => {
