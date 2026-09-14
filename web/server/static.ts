@@ -28,6 +28,8 @@ export function serveStatic(distDir: string) {
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(distDir, "index.html");
     if (!fs.existsSync(file)) { res.writeHead(404); res.end("not built: run pnpm build"); return; }
     res.writeHead(200, { "content-type": types[path.extname(file)] ?? "application/octet-stream" });
-    fs.createReadStream(file).pipe(res);
+    // The catch-all around the request handler cannot see an error from this stream: it fires
+    // asynchronously, after the handler that started it has already returned.
+    fs.createReadStream(file).on("error", () => { if (!res.headersSent) res.writeHead(500); res.end(); }).pipe(res);
   };
 }

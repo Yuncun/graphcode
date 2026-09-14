@@ -50,6 +50,11 @@ daemon's `NodeDraft` for the brief the user filled in. A module that fails to lo
 listed in the Nodes tab with its error. ↻ in the Nodes tab reloads the packs; the browser fetches each
 module through a fresh URL, so an edited file shows on the next reload.
 
+A project pack is code. Opening a project on the canvas imports and runs every module under its
+`.graphcode/nodes/` with the page's own privileges, the way ComfyUI runs an extension, so treat a
+repository's pack like any other code in that repository before opening it. A per-project consent
+prompt is planned.
+
 ## Editing
 
 Drag a node type onto the canvas, fill in the brief in the inspector and press Create; only then is

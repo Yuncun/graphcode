@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -25,6 +26,18 @@ function roots() {
 
 const cleanup: string[] = [];
 afterEach(() => { for (const d of cleanup.splice(0)) fs.rmSync(d, { recursive: true, force: true }); });
+
+/** A raw request with a Host header `fetch` will not let a test set, to check the bridge's Host guard. */
+function getWithHost(port: number, reqPath: string, host: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: "127.0.0.1", port, path: reqPath, headers: { host } }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode!));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 describe("TYPE_NAME", () => {
   it("accepts pack/name and refuses anything else", () => {
@@ -107,6 +120,17 @@ describe("GET /api/nodes and /api/nodes/file", () => {
       expect((await fetch(base + timed.url)).status).toBe(404);
       const after = (await (await fetch(`${base}/api/nodes`)).json()) as { types: unknown[] };
       expect(after.types).toHaveLength(before.types.length - 1);
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it("refuses an /api/nodes request whose Host names another host, DNS rebinding's target, and accepts the real one", async () => {
+    const r = roots(); cleanup.push(r.dir);
+    const bridge = await startBridge({ port: 0, socketPath: path.join(r.dir, "absent.sock"), distDir: null, nodeTypeRoots: { builtin: r.builtin, user: r.user } });
+    try {
+      expect(await getWithHost(bridge.port, "/api/nodes", "evil.example:80")).toBe(403);
+      expect((await fetch(`http://127.0.0.1:${bridge.port}/api/nodes`)).status).toBe(200);
     } finally {
       await bridge.close();
     }

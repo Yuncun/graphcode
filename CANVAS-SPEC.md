@@ -166,6 +166,9 @@ node; those modules additionally export `run(inputs)`.
 A file that fails to load is listed in the Nodes tab with its error and skipped, the way ComfyUI
 treats a broken extension.
 
+A project pack runs on open with the page's privileges (like a ComfyUI extension); a consent prompt
+is a later phase.
+
 ## 7. What the user sees
 
 | Surface | Behaviour |

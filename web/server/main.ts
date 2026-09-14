@@ -19,16 +19,25 @@ const VITE_DEV_ORIGIN = "http://localhost:5173";
 const BUILTIN_NODES_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "nodes");
 
 /**
+ * Closes DNS rebinding, where a name the attacker owns resolves to 127.0.0.1 and so reaches the
+ * bridge carrying whatever Host and Origin the attacker's page likes. Requiring Host to name this
+ * bridge's own port defeats that regardless of Origin, since the browser sets Host from the URL
+ * actually being requested, which the attacker's page cannot override.
+ */
+export function acceptsHost(req: http.IncomingMessage, port: number): boolean {
+  const host = req.headers.host;
+  return host === `localhost:${port}` || host === `127.0.0.1:${port}`;
+}
+
+/**
  * WebSockets are exempt from the browser's same-origin policy, so without this check any page
  * the developer happens to have open could open ws://localhost:4747/ws and send the daemon
  * whatever it liked. Accept a handshake that carries no Origin at all (a non-browser client,
- * such as a test), and otherwise only the bridge's own page or the Vite dev server. Checking
- * Host as well closes DNS rebinding, where a name the attacker owns resolves to 127.0.0.1 and
- * so reaches the bridge with an Origin of its own.
+ * such as a test), and otherwise only the bridge's own page or the Vite dev server. `acceptsHost`
+ * covers the Host half; the `/api/*` routes below share that same check.
  */
 export function acceptsHandshake(req: http.IncomingMessage, port: number): boolean {
-  const host = req.headers.host;
-  if (host !== `localhost:${port}` && host !== `127.0.0.1:${port}`) return false;
+  if (!acceptsHost(req, port)) return false;
   const origin = req.headers.origin;
   return origin === undefined
     || origin === `http://localhost:${port}`
@@ -45,10 +54,10 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   });
 }
 
-function projectFromQuery(req: http.IncomingMessage): string | null {
+async function projectFromQuery(req: http.IncomingMessage): Promise<string | null> {
   const project = new URL(req.url ?? "/", "http://localhost").searchParams.get("project") ?? "";
   if (!path.isAbsolute(project)) return null;
-  try { return fs.statSync(project).isDirectory() ? project : null; } catch { return null; }
+  try { return (await fs.promises.stat(project)).isDirectory() ? project : null; } catch { return null; }
 }
 
 export async function startBridge(options: BridgeOptions): Promise<{ port: number; close(): Promise<void> }> {
@@ -61,8 +70,13 @@ export async function startBridge(options: BridgeOptions): Promise<{ port: numbe
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
+      // The WebSocket handshake names DNS rebinding as the reason it checks Host; the HTTP API
+      // routes read and write files on this machine on the strength of the same origin, so they
+      // get the same Host half of that check (Origin/CORS already covers a browser fetch; this
+      // closes the gap a rebound page would otherwise walk through).
+      if (url.pathname.startsWith("/api/") && !acceptsHost(req, boundPort)) { res.writeHead(403); res.end(); return; }
       if (url.pathname === "/api/canvas") {
-        const project = projectFromQuery(req);
+        const project = await projectFromQuery(req);
         if (!project) { res.writeHead(400, { "content-type": "application/json" }); res.end('{"error":"project must be an absolute path to an existing directory"}'); return; }
         if (req.method === "GET") {
           res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(await readCanvas(project))); return;
@@ -79,7 +93,7 @@ export async function startBridge(options: BridgeOptions): Promise<{ port: numbe
       if (url.pathname === "/api/nodes") {
         if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
         // `project` is optional here: with none, only the built-in and user packs are listed.
-        const project = projectFromQuery(req);
+        const project = await projectFromQuery(req);
         if (url.searchParams.has("project") && !project) { json(res, 400, { error: "project must be an absolute path to an existing directory" }); return; }
         const types = await listNodeTypes(nodeTypeRoots, project);
         const projectQuery = project ? `&project=${encodeURIComponent(project)}` : "";
@@ -90,7 +104,7 @@ export async function startBridge(options: BridgeOptions): Promise<{ port: numbe
         if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
         const source = url.searchParams.get("source") as NodeTypeSource | null;
         const type = url.searchParams.get("type") ?? "";
-        const project = projectFromQuery(req);
+        const project = await projectFromQuery(req);
         if (!source || !NODE_TYPE_SOURCES.includes(source) || (source === "project" && !project)) { json(res, 400, { error: "source must be builtin, user, or project (with a project path)" }); return; }
         const file = await nodeTypeFile(nodeTypeRoots, project, source, type);
         if (!file) { res.writeHead(404); res.end(); return; }
