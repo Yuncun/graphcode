@@ -2,13 +2,15 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { createStore } from "./daemon/store.ts";
 import { DaemonConnection, type ConnectionStatus } from "./daemon/connection.ts";
-import type { DaemonCommand } from "./daemon/protocol.ts";
+import type { DaemonCommand, NodeDraft } from "./daemon/protocol.ts";
+import { graphCommand } from "./daemon/protocol.ts";
 import { loadNodeTypes, type NodeTypeEntry } from "./nodes/registry.ts";
 import GraphCanvas from "./canvas/GraphCanvas.vue";
 import ProjectTabs from "./tabs/ProjectTabs.vue";
 import Sidebar from "./sidebar/Sidebar.vue";
 import NodesPanel from "./sidebar/NodesPanel.vue";
 import WorkflowsPanel from "./sidebar/WorkflowsPanel.vue";
+import Inspector, { type PendingCreate } from "./inspector/Inspector.vue";
 
 const store = createStore();
 /** Holds the canvas so a project being closed can have its pending layout save written first. */
@@ -88,6 +90,27 @@ async function reloadNodeTypes() {
 // activeGraph) never asks the bridge for a listing, so its own errorOccurred is what the footer shows.
 watch(confirmedProject, () => { void reloadNodeTypes(); }, { immediate: true });
 
+/** A node type dropped on the canvas, waiting for its brief to be confirmed. */
+const pending = ref<PendingCreate | null>(null);
+
+function onDropType({ type, pos }: { type: string; pos: [number, number] }) {
+  const entry = nodeTypes.value.find((e) => e.type === type);
+  if (!entry || !entry.ok) { store.pushError(`node type ${type} is not loaded`); return; }
+  pending.value = { def: entry.def, pos };
+}
+
+/** The brief is confirmed: place the card first, then tell the daemon. A goal loop starts on creation. */
+function onCreate(draft: NodeDraft) {
+  const project = active.value;
+  const drop = pending.value;
+  if (!project || !drop) return;
+  canvasView.value?.reserveLayout(project, draft.id, drop.pos);
+  if (send(graphCommand(project, { createNode: { _0: draft } }))) pending.value = null;
+}
+
+// A dropped brief belongs to the project it was dropped on.
+watch(active, () => { pending.value = null; });
+
 onMounted(() => {
   (window as unknown as { __graphcode: unknown }).__graphcode = {
     store,
@@ -110,10 +133,10 @@ onMounted(() => {
         <template #workflows><WorkflowsPanel :recent="store.recent" @open="openProject" /></template>
       </Sidebar>
       <section class="center">
-        <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" />
+        <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" @drop-type="onDropType" />
         <div v-else class="empty" data-testid="empty">{{ status === "open" ? "No open projects. Press + to open a folder." : "Connecting to graphcoded…" }}</div>
       </section>
-      <aside class="inspector" data-testid="inspector"><p class="hint" data-testid="inspector-hint">Select a card, or drag a node type from the Nodes tab onto the canvas.</p></aside>
+      <Inspector :pending="pending" @create="onCreate" @cancel="pending = null" />
     </div>
     <footer class="status" data-testid="status">{{ status }}<span v-if="lastError" class="error"> · {{ lastError }}</span></footer>
   </main>
@@ -126,8 +149,6 @@ body { background: #17191d; color: #e8e6e1; font-family: -apple-system, "Helveti
 .body { flex: 1; display: flex; min-height: 0; }
 .center { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .empty { flex: 1; display: grid; place-items: center; color: #8b909a; }
-.inspector { width: 300px; flex: none; overflow: auto; background: #1e2126; border-left: 1px solid #2f333a; padding: 10px; box-sizing: border-box; }
-.inspector .hint { color: #8b909a; font-size: 12px; margin: 0; }
 .status { padding: 4px 10px; font-size: 12px; color: #8b909a; border-top: 1px solid #2f333a; background: #1e2126; }
 .error { color: #f4b58f; }
 </style>

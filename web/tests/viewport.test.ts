@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import type { LGraphNode } from "@comfyorg/litegraph";
-import { applyViewport, FIT_ZOOM, fitToNodes, readViewport } from "../app/canvas/viewport.ts";
+import { applyViewport, FIT_MIN_SCALE, FIT_ZOOM, fitToNodes, readViewport } from "../app/canvas/viewport.ts";
 
 /** Stands in for litegraph's DragAndScale with the same fitToBounds arithmetic (litegraph.es.js, `fitToBounds`). */
 function fakeCanvas(width: number, height: number) {
@@ -42,11 +42,16 @@ describe("fitToNodes", () => {
     expect(c.dirty()).toBe(1);
   });
 
-  it("zooms out to show a large graph in one call", () => {
+  it("zooms out for a large graph but never below FIT_MIN_SCALE", () => {
     const c = fakeCanvas(1400, 900);
-    expect(fitToNodes(c as never, [card(40, 40), card(3000, 2500)])).toBe(true);
+    expect(fitToNodes(c as never, [card(40, 40), card(1000, 40)])).toBe(true);
     expect(c.calls).toEqual([{ zoom: FIT_ZOOM }]);
+    expect(c.ds.scale).toBeGreaterThanOrEqual(FIT_MIN_SCALE);
     expect(c.ds.scale).toBeLessThan(1);
+    const huge = fakeCanvas(1400, 900);
+    expect(fitToNodes(huge as never, [card(40, 40), card(3000, 2500)])).toBe(true);
+    expect(huge.calls).toEqual([{ zoom: FIT_ZOOM }, { zoom: 0 }]);
+    expect(huge.ds.scale).toBe(FIT_MIN_SCALE);
   });
 });
 

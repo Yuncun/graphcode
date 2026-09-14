@@ -4,6 +4,8 @@ import { createBounds, type LGraphCanvas, type LGraphNode } from "@comfyorg/lite
 export const FIT_PADDING = 60;
 /** Fraction of the canvas the fitted graph may fill (litegraph's default is 0.75). */
 export const FIT_ZOOM = 0.9;
+/** Below this, litegraph's default low_quality_zoom_threshold (0.6) stops drawing titles, badges and slot labels. */
+export const FIT_MIN_SCALE = 0.6;
 
 export interface Viewport { scale: number; offset: [number, number] }
 
@@ -20,6 +22,12 @@ export function fitToNodes(canvas: { ds: Scaler; setDirty(fg: boolean, bg: boole
   if (canvas.ds.scale > 1) {
     // zoom 0 keeps the current scale and only recentres.
     canvas.ds.scale = 1;
+    canvas.ds.fitToBounds(bounds, { zoom: 0 });
+  }
+  if (canvas.ds.scale < FIT_MIN_SCALE) {
+    // A huge graph is shown at a readable size and overflows; the user pans. Below this scale
+    // litegraph draws boxes without text.
+    canvas.ds.scale = FIT_MIN_SCALE;
     canvas.ds.fitToBounds(bounds, { zoom: 0 });
   }
   canvas.setDirty(true, true);

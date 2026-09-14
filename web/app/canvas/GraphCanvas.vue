@@ -3,12 +3,20 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { LGraph, LGraphCanvas, LiteGraph } from "@comfyorg/litegraph";
 import "@comfyorg/litegraph/style.css";
 import type { LoopGraph } from "../daemon/protocol.ts";
+import { NODE_TYPE_MIME } from "../sidebar/library.ts";
 import { GraphAdapter, type CanvasDoc } from "./adapter.ts";
 import { getLayout, putLayout } from "./layoutClient.ts";
 import { createSaveScheduler } from "./saveScheduler.ts";
 import { applyViewport, fitToNodes, readViewport, type Viewport } from "./viewport.ts";
 
-interface ProjectView { adapter: GraphAdapter; layout: CanvasDoc; /** null until the first fit; then the last pan and zoom seen on this project. */ viewport: Viewport | null }
+interface ProjectView {
+  adapter: GraphAdapter;
+  layout: CanvasDoc;
+  /** null until the first fit; then the last pan and zoom seen on this project. */
+  viewport: Viewport | null;
+  /** Positions reserved for nodes the daemon has not reported yet, keyed by the id the app minted. */
+  pending: Map<string, [number, number]>;
+}
 
 const SAVE_DELAY_MS = 500;
 /**
@@ -19,6 +27,7 @@ const SAVE_DELAY_MS = 500;
 const VIEW_MARGIN: [number, number] = [24, LiteGraph.NODE_TITLE_HEIGHT + 24];
 
 const props = defineProps<{ graph: LoopGraph }>();
+const emit = defineEmits<{ dropType: [payload: { type: string; pos: [number, number] }] }>();
 const canvasEl = ref<HTMLCanvasElement | null>(null);
 let canvas: LGraphCanvas | null = null;
 /**
@@ -39,7 +48,7 @@ let shown: ProjectView | null = null;
 function viewFor(project: string): Promise<ProjectView> {
   let view = views.get(project);
   if (!view) {
-    view = getLayout(project).then((layout) => ({ adapter: new GraphAdapter(new LGraph()), layout, viewport: null }));
+    view = getLayout(project).then((layout) => ({ adapter: new GraphAdapter(new LGraph()), layout, viewport: null, pending: new Map() }));
     views.set(project, view);
     view.then((v) => resolved.set(project, v));
   }
@@ -72,12 +81,45 @@ async function show(graph: LoopGraph): Promise<void> {
 async function save(project: string): Promise<void> {
   const view = await views.get(project);
   if (!view) return;
-  view.layout = view.adapter.positions();
+  const doc = view.adapter.positions();
+  for (const [id, pos] of view.pending) {
+    if (doc.nodes[id]) view.pending.delete(id);
+    else doc.nodes[id] = { pos };
+  }
+  view.layout = doc;
   try {
     await putLayout(project, view.layout);
   } catch (error) {
     console.warn("graphcode: could not save the canvas layout", error);
   }
+}
+
+/**
+ * The card for a node the daemon is about to report must land where it was dropped: the position is
+ * written into the layout now under the id the app minted, and `placeNodes` honours it on the sync
+ * that brings the node.
+ */
+function reserveLayout(project: string, id: string, pos: [number, number]): void {
+  const view = resolved.get(project);
+  if (!view) return;
+  view.layout.nodes[id] = { pos };
+  view.pending.set(id, pos);
+  saves.schedule(project);
+}
+
+function onDragOver(event: DragEvent) {
+  if (!event.dataTransfer?.types.includes(NODE_TYPE_MIME)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+}
+
+function onDrop(event: DragEvent) {
+  const type = event.dataTransfer?.getData(NODE_TYPE_MIME);
+  if (!type || !canvas) return;
+  event.preventDefault();
+  // Graph-space point under the cursor; it becomes the new card's top-left.
+  const [x, y] = canvas.convertEventToCanvasOffset(event);
+  emit("dropType", { type, pos: [x, y] });
 }
 
 function fit(): void {
@@ -96,6 +138,9 @@ onMounted(async () => {
   if (!element) return;
   // The constructor starts litegraph's render loop; stopRendering() below pairs with it.
   canvas = new LGraphCanvas(element, view.adapter.lgraph);
+  // litegraph stops drawing text below this scale (its default is 0.6); the fit floor is 0.6,
+  // so text survives the fit and one zoom step out.
+  canvas.low_quality_zoom_threshold = 0.5;
   shown = view;
   canvas.allow_searchbox = false;
   canvas.show_info = false;
@@ -121,6 +166,7 @@ defineExpose({
   flushSave: (project: string) => saves.flush(project),
   positions: (project: string) => resolved.get(project)?.adapter.positions().nodes,
   viewport: () => canvas ? { scale: canvas.ds.scale, offset: [canvas.ds.offset[0], canvas.ds.offset[1]] as [number, number], width: canvas.canvas.width, height: canvas.canvas.height } : undefined,
+  reserveLayout,
 });
 
 onBeforeUnmount(() => {
@@ -131,7 +177,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="canvas-host"><canvas ref="canvasEl"></canvas></div>
+  <div class="canvas-host" @dragover="onDragOver" @drop="onDrop"><canvas ref="canvasEl"></canvas></div>
 </template>
 
 <style scoped>
