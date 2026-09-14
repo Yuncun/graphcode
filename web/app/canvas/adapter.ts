@@ -33,7 +33,7 @@ export class GraphAdapter {
         card.pos = positions.get(loop.id) ?? [40, 40];
         this.lgraph.add(card);
       }
-      card.apply(loop);
+      card.applyLive(loop, null);
     }
 
     const wantedEdges = new Map(graph.edges.map((e) => [e.id, e]));
@@ -75,7 +75,7 @@ export class GraphAdapter {
     }
     for (const node of this.lgraph.nodes as LoopCardNode[]) {
       for (let i = node.inputs.length - 1; i >= 0; i--) if (node.inputs[i]!.link == null) node.removeInput(i);
-      node.setSize(node.computeSize());
+      node.fitHeight();
     }
     this.lgraph.setDirtyCanvas(true, true);
   }
