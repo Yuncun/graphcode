@@ -99,13 +99,15 @@ function onDropType({ type, pos }: { type: string; pos: [number, number] }) {
   pending.value = { def: entry.def, pos };
 }
 
-/** The brief is confirmed: place the card first, then tell the daemon. A goal loop starts on creation. */
+/** The brief is confirmed: tell the daemon, then reserve the drop position. A goal loop starts on creation. */
 function onCreate(draft: NodeDraft) {
   const project = active.value;
   const drop = pending.value;
   if (!project || !drop) return;
+  if (!send(graphCommand(project, { createNode: { _0: draft } }))) return;
+  // The daemon answers over the socket, so the reservation is in place before its graphChanged can arrive.
   canvasView.value?.reserveLayout(project, draft.id, drop.pos);
-  if (send(graphCommand(project, { createNode: { _0: draft } }))) pending.value = null;
+  pending.value = null;
 }
 
 // A dropped brief belongs to the project it was dropped on.

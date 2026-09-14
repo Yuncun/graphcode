@@ -6,6 +6,7 @@ import type { LoopGraph } from "../daemon/protocol.ts";
 import { NODE_TYPE_MIME } from "../sidebar/library.ts";
 import { GraphAdapter, type CanvasDoc } from "./adapter.ts";
 import { getLayout, putLayout } from "./layoutClient.ts";
+import { mergeReserved, type Reservation } from "./reserved.ts";
 import { createSaveScheduler } from "./saveScheduler.ts";
 import { applyViewport, fitToNodes, readViewport, type Viewport } from "./viewport.ts";
 
@@ -15,7 +16,7 @@ interface ProjectView {
   /** null until the first fit; then the last pan and zoom seen on this project. */
   viewport: Viewport | null;
   /** Positions reserved for nodes the daemon has not reported yet, keyed by the id the app minted. */
-  pending: Map<string, [number, number]>;
+  pending: Map<string, Reservation>;
 }
 
 const SAVE_DELAY_MS = 500;
@@ -81,12 +82,7 @@ async function show(graph: LoopGraph): Promise<void> {
 async function save(project: string): Promise<void> {
   const view = await views.get(project);
   if (!view) return;
-  const doc = view.adapter.positions();
-  for (const [id, pos] of view.pending) {
-    if (doc.nodes[id]) view.pending.delete(id);
-    else doc.nodes[id] = { pos };
-  }
-  view.layout = doc;
+  view.layout = mergeReserved(view.adapter.positions(), view.pending);
   try {
     await putLayout(project, view.layout);
   } catch (error) {
@@ -97,13 +93,15 @@ async function save(project: string): Promise<void> {
 /**
  * The card for a node the daemon is about to report must land where it was dropped: the position is
  * written into the layout now under the id the app minted, and `placeNodes` honours it on the sync
- * that brings the node.
+ * that brings the node. The caller only reserves once the daemon has actually accepted the create, so
+ * a reservation is only ever made for a node that should eventually exist; `mergeReserved` still expires
+ * it (RESERVE_TTL_MS) in case the daemon's answer never arrives.
  */
 function reserveLayout(project: string, id: string, pos: [number, number]): void {
   const view = resolved.get(project);
   if (!view) return;
   view.layout.nodes[id] = { pos };
-  view.pending.set(id, pos);
+  view.pending.set(id, { pos, at: Date.now() });
   saves.schedule(project);
 }
 
