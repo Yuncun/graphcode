@@ -155,6 +155,9 @@ Slot types map onto the engine's edge model with no engine change:
 | `message` | kind message, always |
 | `spawn` | kind spawn, always |
 
+In phase 1 every card carries the same five outputs (handoff, on success, on failure, message,
+spawn); a module's own `inputs` and `outputs` are validated and kept for a later phase.
+
 An input accepts links whose slot type matches its own; litegraph enforces this. Version 1 built-ins:
 `agent/goal`, `agent/timed`, `agent/main`, `agent/turn`, `group/composite`. Phase 3 adds
 deterministic nodes (`shell`, `git`, `compare`, `gate`, `source`) once the daemon can run a script
@@ -168,11 +171,11 @@ treats a broken extension.
 | Surface | Behaviour |
 |---|---|
 | Project tabs | Open projects from the daemon. Closing a tab sends `closeProject`. The graph inside a tab is that project's live graph. |
-| Canvas | ComfyUI interactions: drag to pan, wheel to zoom, drag a slot to link, double-click for the search box, right-click for the litegraph context menu. Cards show title, state pill, live line, type and age, drawn by the node adapter from the daemon's node. Clicking a card selects it and opens its terminal tab. |
-| Nodes tab | Tree of node types by category with search. Drag onto the canvas creates a node with default widget values; the inspector opens for the brief. Create is sent to the daemon only when the brief is confirmed, because a goal loop starts on creation (finding 19). |
+| Canvas | ComfyUI interactions: drag to pan, wheel to zoom, drag a slot to link, double-click for the search box, right-click for the litegraph context menu. Cards show title, state pill, live line, type and age, drawn by the node adapter from the daemon's node. Clicking a card selects it and opens its terminal tab. Right-click menus and the search box are off until their items send daemon commands (phase 1 ruling 2). |
+| Nodes tab | Tree of node types by category with search. Drag onto the canvas creates a node with default widget values; the inspector opens for the brief. Create is sent to the daemon only when the brief is confirmed, because a goal loop starts on creation (finding 19). Version 1 pack: agent/goal, agent/timed, agent/main, agent/turn, group/composite; project pack over user pack over built-in on the same name. |
 | Workflows tab | Recent projects, open by path, and saved graphs (exported bundles). |
 | Templates tab | The kit's template files. Dragging one onto the canvas creates a node with the template's settings. Composite templates come in phase 2 through `importNodes`. |
-| Inspector | Widgets for the selected node, its edges with kind and condition, and actions: Rename, Stop, Restart, Detach from template, Delete. Edge edit is delete and redraw, as today. |
+| Inspector | Brief of the selected node, read-only in phase 1, with Rename; its edges with kind, condition and a delete each; actions Stop, Restart, Detach from template, Delete. |
 | Bottom panel | Terminal per opened node (xterm.js attached to the zmx session), plus the project's Mailroom. |
 | Attention | A count of loops needing a human in the tab strip, and an orange glow on the card, as today. |
 
@@ -185,7 +188,8 @@ with a fixture graph that shows every loop state, loop type and edge condition a
 screenshot per row under `web/e2e/out/`, so the whole surface is seen on every run, not only what the
 live daemon happens to be doing. Phase 0 shipped without this; phase 1's plan starts with the matrix
 for the phase 0 surface (tabs, close, open by path, drag and reload, daemon down at boot, daemon lost
-mid-session, all nine card states).
+mid-session, all nine card states). Phase 1 shipped both matrices: `web/e2e/phase0-matrix.spec.ts`
+(10 rows) and `web/e2e/phase1-matrix.spec.ts` (23 rows).
 
 - Bridge: unit tests for framing, relay and registry loading (`node --test`).
 - Web app: Playwright smoke against the fork daemon: boot, open the TwoDrive project, drag a node type

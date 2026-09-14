@@ -26,8 +26,34 @@ well.
     make web-test         # unit tests (vitest)
     cd web && pnpm e2e    # playwright smoke test; needs a running daemon with /Users/ericshen/Claude/twodrive
 
+`pnpm e2e` runs the phase 0 and phase 1 matrices against the scripted fake daemon (screenshots in
+`e2e/out/`) and the read-only smoke test against the release daemon.
+
 ## Layout
 
 - `server/` bridge: websocket relay of the daemon's own JSON frames, `/api/canvas` for positions, static files
 - `app/` Vue app: `daemon/` (types, connection, store), `canvas/` (litegraph adapter, card node, placement), `tabs/`
 - Positions live in `<project>/.graphcode/canvas.json`
+
+## Node packs
+
+A node type is one ES module at `<pack>/<name>.js`; its type name is that path. The bridge looks in
+three places, and a later one wins the same name:
+
+1. `web/nodes/` in the repo (built-in: `agent/goal`, `agent/timed`, `agent/main`, `agent/turn`, `group/composite`)
+2. `~/.graphcode/nodes/`
+3. `<project>/.graphcode/nodes/`
+
+The module's default export carries `title`, `category`, optional `description`, `inputs`, `outputs`,
+`widgets` (`text`, `combo`, `number`, `toggle`) and `toDraft(values)`, which returns the fields of the
+daemon's `NodeDraft` for the brief the user filled in. A module that fails to load or to validate is
+listed in the Nodes tab with its error. ↻ in the Nodes tab reloads the packs; the browser fetches each
+module through a fresh URL, so an edited file shows on the next reload.
+
+## Editing
+
+Drag a node type onto the canvas, fill in the brief in the inspector and press Create; only then is
+`createNode` sent (a goal loop starts on creation). Drag from a card's output slot (handoff, on
+success, on failure, message, spawn) onto another card to create that edge. Select a card to see its
+brief and edges; the inspector holds Rename, Stop, Restart, Detach from template, Delete and a delete
+per edge. litegraph's own context menus and search box are off in this phase.

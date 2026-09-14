@@ -3,17 +3,10 @@ import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { alphaGraph, ID } from "./fixture/graph.ts";
 import { launch, openApp, receivedCommands, shot, type Harness } from "./fixture/harness.ts";
+import type { GraphcodeWindow } from "./fixture/window.ts";
 
 declare global {
-  interface Window {
-    __graphcode: {
-      store: { projects: Map<string, { nodes: Array<{ id: string; state: Record<string, unknown> }> }>; order: string[]; errors: string[] };
-      openProject(path: string): void;
-      active(): string | null;
-      positions(project: string): Record<string, { pos: [number, number] }> | undefined;
-      viewport(): { scale: number; offset: [number, number]; width: number; height: number } | undefined;
-    };
-  }
+  interface Window { __graphcode: GraphcodeWindow }
 }
 
 const nodeCount = (page: Page, project: string) =>
