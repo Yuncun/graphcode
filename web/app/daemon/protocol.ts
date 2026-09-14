@@ -27,6 +27,10 @@ export interface LoopNode {
   presence?: { presence: string; confidence: string };
   usage?: { inputTokens: number; outputTokens: number; reportedAt: number };
   subGraph?: LoopGraph;
+  checkDescription?: string;
+  createdFromTemplateID?: string;
+  /** Present on a loop that follows a template file; absent on a snapshot or a loop made by hand. */
+  templateFollow?: Record<string, unknown>;
 }
 
 export interface LoopEdge {
