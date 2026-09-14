@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import { LGraph } from "@comfyorg/litegraph";
 import { GraphAdapter } from "../app/canvas/adapter.ts";
 import { connectAsAdapter, type LoopCardNode } from "../app/canvas/LoopCardNode.ts";
+import { cardHeight } from "../app/canvas/LoopCardNode.ts";
 import type { LoopGraph, LoopNode } from "../app/daemon/protocol.ts";
 
 const n = (id: string, title = id): LoopNode => ({ id, title, loopType: "goalBased", state: { running: {} }, createdAt: 0, pausesBeforeWritesOnly: false, pilotState: "notPiloted" });
-const g = (nodes: LoopNode[], edges: Array<[string, string, "handoff" | "message"]>): LoopGraph => ({
+// Replace the g helper with this one; the existing calls keep working because the fourth element is optional.
+const g = (nodes: LoopNode[], edges: Array<[string, string, "handoff" | "message" | "spawn", ("always" | "onSuccess" | "onFailure")?]>): LoopGraph => ({
   id: "G", revision: 1, project: { path: "/p", name: "p" }, nodes,
-  edges: edges.map(([from, to, kind], i) => ({ id: `E${i}`, from, to, kind, condition: "always", fireCount: 0 })),
+  edges: edges.map(([from, to, kind, condition], i) => ({ id: `E${i}`, from, to, kind, condition: condition ?? "always", fireCount: 0 })),
 });
 
 describe("GraphAdapter", () => {
@@ -46,7 +48,8 @@ describe("GraphAdapter", () => {
     const b = lgraph.getNodeById("B") as LoopCardNode;
     b.addInput("message", "message");
     // Made the way the adapter makes its own, so the graph really does carry a second link.
-    expect(connectAsAdapter(() => a.connect(1, b, b.inputs.length - 1))).not.toBe(null);
+    // Output slot 3 is "message" (see OUTPUT_SLOTS); it must match the input's type to connect.
+    expect(connectAsAdapter(() => a.connect(3, b, b.inputs.length - 1))).not.toBe(null);
     expect(lgraph.links.size).toBe(2);
 
     adapter.sync(graph, { version: 1, nodes: {} });
@@ -79,5 +82,39 @@ describe("GraphAdapter", () => {
     adapter.sync({ ...base, edges: [{ id: "E0", from: "A", to: "C", kind: "handoff", condition: "onFailure", fireCount: 0 }] }, { version: 1, nodes: {} });
     expect(lgraph.links.size).toBe(1);
     expect([...lgraph.links.values()][0]!.target_id).toBe("C");
+  });
+
+  it("draws each edge from the output slot for its kind and condition", () => {
+    const lgraph = new LGraph();
+    const adapter = new GraphAdapter(lgraph);
+    adapter.sync(g([n("A"), n("B"), n("C"), n("D"), n("E"), n("F")], [
+      ["A", "B", "handoff"], ["A", "C", "handoff", "onSuccess"], ["A", "D", "handoff", "onFailure"], ["A", "E", "message"], ["A", "F", "spawn"],
+    ]), { version: 1, nodes: {} });
+    const slots = [...lgraph.links.values()].sort((x, y) => String(x.target_id).localeCompare(String(y.target_id))).map((l) => l.origin_slot);
+    expect(slots).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("moves an edge to another output slot when its condition changes", () => {
+    const lgraph = new LGraph();
+    const adapter = new GraphAdapter(lgraph);
+    adapter.sync(g([n("A"), n("B")], [["A", "B", "handoff", "always"]]), { version: 1, nodes: {} });
+    expect([...lgraph.links.values()][0]!.origin_slot).toBe(0);
+    adapter.sync(g([n("A"), n("B")], [["A", "B", "handoff", "onFailure"]]), { version: 1, nodes: {} });
+    expect(lgraph.links.size).toBe(1);
+    expect([...lgraph.links.values()][0]!.origin_slot).toBe(2);
+    expect([...lgraph.links.values()][0]!.color).toBe("#ef4444");
+  });
+
+  it("shrinks a card back when its edges go away", () => {
+    const lgraph = new LGraph();
+    const adapter = new GraphAdapter(lgraph);
+    const many = g([n("A"), n("B"), n("C"), n("D"), n("E"), n("F"), n("G"), n("Z")], [["A", "Z", "handoff"], ["B", "Z", "handoff"], ["C", "Z", "handoff"], ["D", "Z", "handoff"], ["E", "Z", "handoff"], ["F", "Z", "handoff"], ["G", "Z", "handoff"]]);
+    adapter.sync(many, { version: 1, nodes: {} });
+    const z = lgraph.getNodeById("Z")!;
+    expect(z.inputs).toHaveLength(7);
+    expect(z.size[1]).toBe(cardHeight(7));
+    adapter.sync(g([n("A"), n("Z")], [["A", "Z", "handoff"]]), { version: 1, nodes: {} });
+    expect(z.inputs).toHaveLength(1);
+    expect(z.size[1]).toBe(cardHeight(1));
   });
 });

@@ -1,10 +1,34 @@
-import { LGraphBadge, LGraphNode, LiteGraph } from "@comfyorg/litegraph";
-import type { LoopNode, LoopStateName, LoopType } from "../daemon/protocol.ts";
+import { LGraphBadge, LGraphNode, LiteGraph, type Size } from "@comfyorg/litegraph";
+import type { EdgeCondition, EdgeKind, LoopNode, LoopStateName, LoopType } from "../daemon/protocol.ts";
 import { stateName } from "../daemon/protocol.ts";
 import { ageLabel } from "./time.ts";
 import { liveLine } from "./liveLine.ts";
 
-export const CARD_SIZE: [number, number] = [250, 106];
+export const CARD_WIDTH = 300;
+/** Height under the slot rows for the live line and the meta row. */
+export const TEXT_BLOCK = 52;
+
+export interface OutputSlotDef { name: string; kind: EdgeKind; condition: EdgeCondition }
+
+/** The card's outputs in slot order. A drag from one of them makes an edge of that kind and condition. */
+export const OUTPUT_SLOTS: readonly OutputSlotDef[] = [
+  { name: "handoff", kind: "handoff", condition: "always" },
+  { name: "on success", kind: "handoff", condition: "onSuccess" },
+  { name: "on failure", kind: "handoff", condition: "onFailure" },
+  { name: "message", kind: "message", condition: "always" },
+  { name: "spawn", kind: "spawn", condition: "always" },
+];
+
+/** The output slot that draws an edge of this kind and condition. Message and spawn have one slot each, whatever the condition. */
+export function outputSlotFor(kind: EdgeKind, condition: EdgeCondition): number {
+  const index = OUTPUT_SLOTS.findIndex((s) => s.kind === kind && (kind !== "handoff" || s.condition === condition));
+  return index === -1 ? 0 : index;
+}
+
+/** litegraph draws slot i at (i + 0.7) × NODE_SLOT_HEIGHT; the text block sits under the longer slot column. */
+export function cardHeight(inputCount: number): number {
+  return LiteGraph.NODE_SLOT_HEIGHT * Math.max(OUTPUT_SLOTS.length, inputCount) + TEXT_BLOCK;
+}
 
 const typeLabel: Record<LoopType, string> = { sketch: "Main", goalBased: "Goal", timeBased: "Timed", turnBased: "Turn", proactive: "Composite" };
 const typeColor: Record<LoopType, string> = { sketch: "#8a8f99", goalBased: "#2f8f6b", timeBased: "#b8860b", turnBased: "#8a5cc7", proactive: "#3b7dd8" };
@@ -38,6 +62,8 @@ export function connectAsAdapter<T>(connect: () => T): T {
 /** One GraphCode loop drawn as a card: title bar in the type colour, state badge, live line, meta row. */
 export class LoopCardNode extends LGraphNode {
   static override title = "Loop";
+  /** litegraph reads this static for the title text (`this.constructor.title_text_color`); its default grey is faint on the type-coloured title bar. Not declared on LGraphNode, so no `override`. */
+  static title_text_color = "#ffffff";
   loop: LoopNode | null = null;
   private live = "";
   private meta = "";
@@ -46,16 +72,21 @@ export class LoopCardNode extends LGraphNode {
 
   constructor(title = "Loop") {
     super(title, "graphcode/loop");
-    this.size = [...CARD_SIZE];
     this.resizable = false;
-    // The daemon owns the graph in phase 0, so a card cannot be deleted (Delete or Backspace on
-    // a selection, or the node menu) nor copied, cloned and pasted. Either would leave the
-    // canvas showing something the daemon never reported.
+    // The daemon owns the graph. A card cannot be deleted by litegraph (Delete key, node menu) nor
+    // copied, cloned or pasted: the inspector's Delete sends `deleteNode` instead.
     this.block_delete = true;
     this.clonable = false;
-    this.addOutput("handoff", "handoff");
-    this.addOutput("message", "message");
-    this.addOutput("spawn", "spawn");
+    for (const slot of OUTPUT_SLOTS) this.addOutput(slot.name, slot.kind);
+    this.setSize(this.computeSize());
+  }
+
+  /**
+   * litegraph calls this whenever it may grow the node (`addInput` → `expandToFitContent`), so the
+   * card's size follows one rule everywhere: the taller slot column plus the text block.
+   */
+  override computeSize(): Size {
+    return [CARD_WIDTH, cardHeight(this.inputs?.length ?? 0)];
   }
 
   apply(node: LoopNode): void {
@@ -82,15 +113,17 @@ export class LoopCardNode extends LGraphNode {
     if (this.flags.collapsed) return;
     const pad = 12;
     const width = this.size[0] - pad * 2;
+    const rows = Math.max(OUTPUT_SLOTS.length, this.inputs.length);
+    const textTop = LiteGraph.NODE_SLOT_HEIGHT * rows + 6;
     ctx.save();
     ctx.font = "11px ui-monospace, Menlo, monospace";
     ctx.fillStyle = "#c8cbd0";
     ctx.textBaseline = "top";
     this.liveCache = cachedTruncate(this.liveCache, ctx, this.live, width);
-    ctx.fillText(this.liveCache.result, pad, 12);
+    ctx.fillText(this.liveCache.result, pad, textTop);
     ctx.fillStyle = "#8b909a";
     this.metaCache = cachedTruncate(this.metaCache, ctx, this.meta, width);
-    ctx.fillText(this.metaCache.result, pad, this.size[1] - 22);
+    ctx.fillText(this.metaCache.result, pad, this.size[1] - 20);
     ctx.restore();
   }
 }

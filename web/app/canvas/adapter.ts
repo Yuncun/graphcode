@@ -1,13 +1,12 @@
 import { LGraph, LiteGraph, type LLink } from "@comfyorg/litegraph";
-import type { LoopEdge, LoopGraph } from "../daemon/protocol.ts";
-import { connectAsAdapter, LoopCardNode, registerLoopCardNode } from "./LoopCardNode.ts";
+import type { LoopGraph } from "../daemon/protocol.ts";
+import { connectAsAdapter, LoopCardNode, outputSlotFor, registerLoopCardNode } from "./LoopCardNode.ts";
 import { placeNodes } from "./placement.ts";
 
 export interface CanvasNodeLayout { pos: [number, number]; size?: [number, number] }
 export interface CanvasDoc { version: 1; nodes: Record<string, CanvasNodeLayout> }
 
 const conditionColor: Record<string, string> = { always: "#cfd3d8", onSuccess: "#22c55e", onFailure: "#ef4444" };
-const OUTPUT_SLOT: Record<LoopEdge["kind"], number> = { handoff: 0, message: 1, spawn: 2 };
 
 /** Mirrors a LoopGraph onto an LGraph. The daemon's graph is the truth; litegraph objects are views. */
 export class GraphAdapter {
@@ -46,7 +45,7 @@ export class GraphAdapter {
         || !this.lgraph.links.get(link.id)
         || link.origin_id !== edge.from
         || link.target_id !== edge.to
-        || link.origin_slot !== OUTPUT_SLOT[edge.kind];
+        || link.origin_slot !== outputSlotFor(edge.kind, edge.condition);
       if (stale) {
         if (this.lgraph.links.get(link.id)) this.lgraph.removeLink(link.id);
         this.linkByEdge.delete(edgeID);
@@ -59,7 +58,7 @@ export class GraphAdapter {
       if (!from || !to) continue;
       to.addInput(edge.kind, edge.kind);
       const inputIndex = to.inputs.length - 1;
-      const link = connectAsAdapter(() => from.connect(OUTPUT_SLOT[edge.kind], to, inputIndex));
+      const link = connectAsAdapter(() => from.connect(outputSlotFor(edge.kind, edge.condition), to, inputIndex));
       if (!link) continue;
       this.linkByEdge.set(edge.id, link);
     }
@@ -76,6 +75,7 @@ export class GraphAdapter {
     }
     for (const node of this.lgraph.nodes as LoopCardNode[]) {
       for (let i = node.inputs.length - 1; i >= 0; i--) if (node.inputs[i]!.link == null) node.removeInput(i);
+      node.setSize(node.computeSize());
     }
     this.lgraph.setDirtyCanvas(true, true);
   }
