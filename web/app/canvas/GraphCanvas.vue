@@ -5,6 +5,7 @@ import "@comfyorg/litegraph/style.css";
 import type { LoopGraph } from "../daemon/protocol.ts";
 import { GraphAdapter, type CanvasDoc } from "./adapter.ts";
 import { getLayout, putLayout } from "./layoutClient.ts";
+import { createSaveScheduler } from "./saveScheduler.ts";
 
 interface ProjectView { adapter: GraphAdapter; layout: CanvasDoc }
 
@@ -25,8 +26,8 @@ let canvas: LGraphCanvas | null = null;
  * view, so two shows of the same project cannot race into building two graphs for it.
  */
 const views = new Map<string, Promise<ProjectView>>();
-/** The pending debounced save for each project, so a move in one cannot cancel another's. */
-const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/** Debounced per project, so a move in one project cannot cancel another's pending write. */
+const saves = createSaveScheduler({ delayMs: SAVE_DELAY_MS, save });
 /** Counts show() calls, so a slow one cannot put its project back on screen after a newer one. */
 let shows = 0;
 
@@ -46,24 +47,6 @@ async function show(graph: LoopGraph): Promise<void> {
   if (token !== shows || !canvas) return;
   if (canvas.graph !== view.adapter.lgraph) canvas.setGraph(view.adapter.lgraph);
   canvas.setDirty(true, true);
-}
-
-function scheduleSave(project: string): void {
-  const pending = saveTimers.get(project);
-  if (pending) clearTimeout(pending);
-  saveTimers.set(project, setTimeout(() => {
-    saveTimers.delete(project);
-    void save(project);
-  }, SAVE_DELAY_MS));
-}
-
-/** Write a project's pending move now rather than leaving it to sit out the rest of its wait. */
-function flushSave(project: string): void {
-  const pending = saveTimers.get(project);
-  if (!pending) return;
-  clearTimeout(pending);
-  saveTimers.delete(project);
-  void save(project);
 }
 
 async function save(project: string): Promise<void> {
@@ -96,7 +79,7 @@ onMounted(async () => {
   canvas.allow_searchbox = false;
   canvas.show_info = false;
   canvas.ds.offset = [...VIEW_MARGIN];
-  canvas.onNodeMoved = () => scheduleSave(props.graph.project.path);
+  canvas.onNodeMoved = () => saves.schedule(props.graph.project.path);
   fit();
   window.addEventListener("resize", fit);
   await show(props.graph);
@@ -105,9 +88,15 @@ onMounted(async () => {
 watch(() => props.graph, (graph, previous) => {
   // A deep change to the same graph reports the same object as `previous`, so this only fires
   // when the tab really changed: save the project being left before its debounce runs out.
-  if (previous && previous.project.path !== graph.project.path) flushSave(previous.project.path);
+  if (previous && previous.project.path !== graph.project.path) saves.flush(previous.project.path);
   void show(graph);
 }, { deep: true });
+
+/**
+ * App.vue closes a project that is not the one on screen without the watch above ever firing,
+ * so it calls this: write the move the user made just before closing, and drop the timer with it.
+ */
+defineExpose({ flushSave: (project: string) => saves.flush(project) });
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", fit);

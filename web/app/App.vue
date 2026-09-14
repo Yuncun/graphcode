@@ -7,6 +7,8 @@ import GraphCanvas from "./canvas/GraphCanvas.vue";
 import ProjectTabs from "./tabs/ProjectTabs.vue";
 
 const store = createStore();
+/** Holds the canvas so a project being closed can have its pending layout save written first. */
+const canvasView = ref<InstanceType<typeof GraphCanvas> | null>(null);
 const status = ref<ConnectionStatus>("connecting");
 const active = ref<string | null>(null);
 const connection = new DaemonConnection(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
@@ -17,7 +19,7 @@ const connection = new DaemonConnection(`${location.protocol === "https:" ? "wss
  */
 function send(command: DaemonCommand): boolean {
   if (status.value !== "open") {
-    store.errors.push(`not connected to graphcoded, ${Object.keys(command)[0]} was not sent`);
+    store.pushError(`not connected to graphcoded, ${Object.keys(command)[0]} was not sent`);
     return false;
   }
   connection.send(command);
@@ -43,6 +45,10 @@ const lastError = computed(() => store.errors[store.errors.length - 1] ?? "");
 /** Drop the tab only once the daemon has been told, so the view cannot disagree with the daemon. */
 function closeProject(path: string) {
   if (!send({ closeProject: { path } })) return;
+  // Closing a tab other than the one on screen never changes the canvas's own graph prop, so
+  // nothing else would ever run this project's debounced save: write the last move now, which
+  // also drops the timer with the project.
+  canvasView.value?.flushSave(path);
   store.projects.delete(path);
   store.order = store.order.filter((p) => p !== path);
   if (active.value === path) active.value = store.order[0] ?? null;
@@ -61,7 +67,7 @@ onMounted(() => {
 <template>
   <main class="shell">
     <ProjectTabs :paths="store.order" :names="names" :active="active" @select="active = $event" @close="closeProject" @open="openProject" />
-    <GraphCanvas v-if="activeGraph" :graph="activeGraph" />
+    <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" />
     <div v-else class="empty">{{ status === "open" ? "No open projects. Press + to open a folder." : "Connecting to graphcoded…" }}</div>
     <footer class="status">{{ status }}<span v-if="lastError" class="error"> · {{ lastError }}</span></footer>
   </main>
