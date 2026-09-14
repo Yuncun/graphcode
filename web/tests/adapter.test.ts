@@ -149,6 +149,17 @@ describe("GraphAdapter: the user's side", () => {
     expect(ids(a)).toEqual(["A"]);
   });
 
+  it("removing a draft wired into a live card takes that card's input row with it", () => {
+    const a = make();
+    a.sync(g([n("A")], []), layout());
+    const draft = a.addDraft("agent/goal", [500, 40])!;
+    a.addDraftLink(draft, 0, a.card("A")!);
+    expect(a.card("A")!.inputs).toHaveLength(1);
+    a.removeDrafts([String(draft.id)]);
+    expect(a.card("A")!.inputs).toHaveLength(0);
+    expect(a.draftEdges()).toEqual([]);
+  });
+
   it("wires a draft to a live card as a draft wire, and sends nothing", () => {
     const a = make();
     a.sync(g([n("A")], []), layout());

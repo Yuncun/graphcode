@@ -148,12 +148,16 @@ export class GraphAdapter {
     return link;
   }
 
-  /** Removes the named cards that are drafts (or starting); live ids are ignored, since those are the daemon's to delete. */
+  /** Removes the named cards that are drafts (or starting); live ids are ignored, since those are the daemon's to delete. A card they were wired into loses that input row at once. */
   removeDrafts(ids: string[]): void {
+    let removed = false;
     for (const id of ids) {
       const card = this.card(id);
-      if (card && card.cardMode !== "live") this.removeCard(card);
+      if (!card || card.cardMode === "live") continue;
+      this.removeCard(card);
+      removed = true;
     }
+    if (removed) for (const card of this.cards()) card.pruneInputs();
   }
 
   markStarting(ids: string[]): void {
