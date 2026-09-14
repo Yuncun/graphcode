@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { ref } from "vue";
-type Tab = "nodes" | "workflows";
+type Tab = "nodes" | "workflows" | "projects";
 const tab = ref<Tab>("nodes");
+const tabs: Array<{ id: Tab; label: string }> = [{ id: "nodes", label: "Nodes" }, { id: "workflows", label: "Workflows" }, { id: "projects", label: "Projects" }];
 </script>
 
 <template>
   <aside class="sidebar" data-testid="sidebar">
     <div class="sidebar-tabs" role="tablist">
-      <button role="tab" data-testid="sidebar-tab-nodes" :aria-selected="tab === 'nodes'" :class="{ active: tab === 'nodes' }" @click="tab = 'nodes'">Nodes</button>
-      <button role="tab" data-testid="sidebar-tab-workflows" :aria-selected="tab === 'workflows'" :class="{ active: tab === 'workflows' }" @click="tab = 'workflows'">Workflows</button>
+      <button v-for="t in tabs" :key="t.id" role="tab" :data-testid="`sidebar-tab-${t.id}`" :aria-selected="tab === t.id" :class="{ active: tab === t.id }" @click="tab = t.id">{{ t.label }}</button>
     </div>
     <div class="sidebar-body">
       <slot :name="tab" />
