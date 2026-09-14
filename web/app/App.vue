@@ -3,8 +3,9 @@ import { computed, onMounted, ref, watch } from "vue";
 import { createStore } from "./daemon/store.ts";
 import { DaemonConnection, type ConnectionStatus } from "./daemon/connection.ts";
 import type { DaemonCommand, NodeDraft } from "./daemon/protocol.ts";
-import { graphCommand } from "./daemon/protocol.ts";
+import { edgeSpec, graphCommand } from "./daemon/protocol.ts";
 import { loadNodeTypes, type NodeTypeEntry } from "./nodes/registry.ts";
+import type { LinkRequest } from "./canvas/linkRequest.ts";
 import GraphCanvas from "./canvas/GraphCanvas.vue";
 import ProjectTabs from "./tabs/ProjectTabs.vue";
 import Sidebar from "./sidebar/Sidebar.vue";
@@ -17,6 +18,7 @@ const store = createStore();
 const canvasView = ref<InstanceType<typeof GraphCanvas> | null>(null);
 const status = ref<ConnectionStatus>("connecting");
 const active = ref<string | null>(null);
+const selected = ref<string | null>(null);
 const connection = new DaemonConnection(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
 
 /** Node types for the active project: its own pack, the user's, and the built-ins. */
@@ -52,6 +54,7 @@ connection.onStatus((s) => {
 
 const names = computed(() => Object.fromEntries(store.order.map((p) => [p, store.projects.get(p)?.project.name ?? p])));
 const activeGraph = computed(() => (active.value ? store.projects.get(active.value) ?? null : null));
+const selectedNode = computed(() => activeGraph.value?.nodes.find((n) => n.id === selected.value) ?? null);
 /** The active project once the daemon has actually confirmed it: null for the built-ins-only case, and never a path the daemon rejected (openProject sets `active` before that answer arrives). */
 const confirmedProject = computed(() => activeGraph.value?.project.path ?? null);
 const lastError = computed(() => store.errors[store.errors.length - 1] ?? "");
@@ -110,14 +113,26 @@ function onCreate(draft: NodeDraft) {
   pending.value = null;
 }
 
-// A dropped brief belongs to the project it was dropped on.
-watch(active, () => { pending.value = null; });
+function onLink(request: LinkRequest) {
+  if (!active.value) return;
+  send(graphCommand(active.value, { createEdge: { from: request.from, to: request.to, spec: edgeSpec(request.kind, request.condition) } }));
+}
+function onRename(id: string, title: string) { if (active.value) send(graphCommand(active.value, { renameNode: { _0: id, title } })); }
+function onStop(id: string) { if (active.value) send(graphCommand(active.value, { stopNode: { _0: id } })); }
+function onRestart(id: string) { if (active.value) send(graphCommand(active.value, { restartNode: { _0: id } })); }
+function onDetach(id: string) { if (active.value) send(graphCommand(active.value, { detachTemplate: { _0: id } })); }
+function onRemove(id: string) { if (active.value) send(graphCommand(active.value, { deleteNode: { _0: id } })); }
+function onDeleteEdge(edgeID: string) { if (active.value) send(graphCommand(active.value, { deleteEdge: { _0: edgeID } })); }
+
+// A dropped brief and a selected card both belong to the project they came from; a tab change clears both.
+watch(active, () => { pending.value = null; selected.value = null; });
 
 onMounted(() => {
   (window as unknown as { __graphcode: unknown }).__graphcode = {
     store,
     openProject,
     active: () => active.value,
+    selected: () => selected.value,
     positions: (project: string) => canvasView.value?.positions(project),
     viewport: () => canvasView.value?.viewport(),
     nodeTypes: () => nodeTypes.value,
@@ -135,10 +150,10 @@ onMounted(() => {
         <template #workflows><WorkflowsPanel :recent="store.recent" @open="openProject" /></template>
       </Sidebar>
       <section class="center">
-        <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" @drop-type="onDropType" />
+        <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" @drop-type="onDropType" @select="selected = $event" @link="onLink" />
         <div v-else class="empty" data-testid="empty">{{ status === "open" ? "No open projects. Press + to open a folder." : "Connecting to graphcoded…" }}</div>
       </section>
-      <Inspector :pending="pending" @create="onCreate" @cancel="pending = null" />
+      <Inspector :pending="pending" :node="selectedNode" :graph="activeGraph" @create="onCreate" @cancel="pending = null" @rename="onRename" @stop="onStop" @restart="onRestart" @detach="onDetach" @remove="onRemove" @delete-edge="onDeleteEdge" />
     </div>
     <footer class="status" data-testid="status">{{ status }}<span v-if="lastError" class="error"> · {{ lastError }}</span></footer>
   </main>

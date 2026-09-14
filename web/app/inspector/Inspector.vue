@@ -1,15 +1,26 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import type { NodeDraft } from "../daemon/protocol.ts";
+import type { LoopGraph, LoopNode, NodeDraft } from "../daemon/protocol.ts";
 import type { NodeTypeDef } from "../nodes/registry.ts";
 import { defaultValues, missingRequired } from "../nodes/widgets.ts";
 import { buildDraft, draftProblems, newNodeID } from "../nodes/draft.ts";
+import { canDetach, canStop, edgesFor, fieldsFor } from "./model.ts";
 
 export interface PendingCreate { def: NodeTypeDef; pos: [number, number] }
 
-const props = defineProps<{ pending: PendingCreate | null }>();
-const emit = defineEmits<{ create: [draft: NodeDraft]; cancel: [] }>();
+const props = defineProps<{ pending: PendingCreate | null; node: LoopNode | null; graph: LoopGraph | null }>();
+const emit = defineEmits<{
+  create: [draft: NodeDraft];
+  cancel: [];
+  rename: [id: string, title: string];
+  stop: [id: string];
+  restart: [id: string];
+  detach: [id: string];
+  remove: [id: string];
+  deleteEdge: [edgeID: string];
+}>();
 
+// New-loop brief (Task 8).
 const title = ref("");
 // `any` rather than `unknown`: the template binds these to inputs, selects and checkboxes.
 const values = reactive<Record<string, any>>({});
@@ -35,6 +46,19 @@ const problems = computed<string[]>(() => {
 
 function create() {
   if (draft.value && problems.value.length === 0) emit("create", draft.value);
+}
+
+// Selected loop.
+const renameTitle = ref("");
+// Reset on a new node or a title change from the daemon, not on every live-line update, so typing is not clobbered.
+watch(() => [props.node?.id, props.node?.title] as const, ([, t]) => { renameTitle.value = t ?? ""; }, { immediate: true });
+const fields = computed(() => (props.node ? fieldsFor(props.node) : []));
+const edges = computed(() => (props.node && props.graph ? edgesFor(props.graph, props.node.id) : []));
+const renameReady = computed(() => !!props.node && renameTitle.value.trim() !== "" && renameTitle.value.trim() !== props.node.title);
+
+function confirmDelete() {
+  if (!props.node) return;
+  if (window.confirm(`Delete "${props.node.title}"? This removes its edges and its session and cannot be undone.`)) emit("remove", props.node.id);
 }
 </script>
 
@@ -66,6 +90,35 @@ function create() {
         <button data-testid="inspector-cancel" @click="emit('cancel')">Cancel</button>
       </div>
     </template>
+
+    <template v-else-if="node">
+      <div class="rename">
+        <input v-model="renameTitle" data-testid="inspector-node-title" aria-label="Title" />
+        <button data-testid="inspector-rename" :disabled="!renameReady" @click="emit('rename', node.id, renameTitle.trim())">Rename</button>
+      </div>
+      <dl class="fields" data-testid="inspector-fields">
+        <template v-for="f in fields" :key="f.label">
+          <dt>{{ f.label }}</dt>
+          <dd>{{ f.value }}</dd>
+        </template>
+      </dl>
+      <h3>Edges</h3>
+      <ul class="edges" data-testid="inspector-edges">
+        <li v-for="e in edges" :key="e.id" data-testid="edge-row" :data-edge="e.id">
+          <span class="other">{{ e.direction === "out" ? "→" : "←" }} {{ e.other }}</span>
+          <small>{{ e.kind }} · {{ e.condition }}</small>
+          <button data-testid="edge-delete" aria-label="Delete edge" title="Delete edge" @click="emit('deleteEdge', e.id)">×</button>
+        </li>
+        <li v-if="!edges.length" class="hint">No edges. Drag from an output slot onto another card.</li>
+      </ul>
+      <div class="actions">
+        <button data-testid="action-stop" :disabled="!canStop(node)" @click="emit('stop', node.id)">Stop</button>
+        <button data-testid="action-restart" @click="emit('restart', node.id)">Restart</button>
+        <button data-testid="action-detach" :disabled="!canDetach(node)" @click="emit('detach', node.id)">Detach from template</button>
+        <button class="danger" data-testid="action-delete" @click="confirmDelete">Delete</button>
+      </div>
+    </template>
+
     <p v-else class="hint" data-testid="inspector-hint">Select a card, or drag a node type from the Nodes tab onto the canvas.</p>
   </aside>
 </template>
@@ -85,4 +138,18 @@ h2 { font-size: 14px; margin: 0; }
 .actions button.primary { background: #2f6fcf; border-color: #2f6fcf; color: white; }
 .actions button:disabled { opacity: .5; cursor: default; }
 .actions button:focus-visible { outline: 2px solid #3b7dd8; outline-offset: 1px; }
+.rename { display: flex; gap: 6px; }
+.rename input { flex: 1; min-width: 0; background: #17191d; color: #e8e6e1; border: 1px solid #2f333a; border-radius: 4px; padding: 5px 8px; font: inherit; }
+.rename button { background: #23262c; color: inherit; border: 1px solid #2f333a; border-radius: 4px; padding: 0 10px; font: inherit; cursor: pointer; }
+.rename button:disabled { opacity: .5; cursor: default; }
+.fields { display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; margin: 0; font-size: 12px; }
+.fields dt { color: #8b909a; }
+.fields dd { margin: 0; white-space: pre-wrap; word-break: break-word; }
+h3 { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: #8b909a; margin: 4px 0 0; }
+.edges { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.edges li { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; padding: 4px 6px; border: 1px solid #2f333a; border-radius: 4px; }
+.edges small { color: #8b909a; }
+.edges button { background: none; border: 0; color: inherit; cursor: pointer; opacity: .6; font: inherit; }
+.edges button:hover { opacity: 1; }
+.actions button.danger { border-color: #7a3b3b; color: #f4b58f; }
 </style>

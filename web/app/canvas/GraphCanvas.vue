@@ -6,6 +6,7 @@ import type { LoopGraph } from "../daemon/protocol.ts";
 import { NODE_TYPE_MIME } from "../sidebar/library.ts";
 import { GraphAdapter, type CanvasDoc } from "./adapter.ts";
 import { getLayout, putLayout } from "./layoutClient.ts";
+import { linkRequestFrom, type DraggedLink, type LinkRequest } from "./linkRequest.ts";
 import { mergeReserved, type Reservation } from "./reserved.ts";
 import { createSaveScheduler } from "./saveScheduler.ts";
 import { applyViewport, fitToNodes, readViewport, type Viewport } from "./viewport.ts";
@@ -28,7 +29,11 @@ const SAVE_DELAY_MS = 500;
 const VIEW_MARGIN: [number, number] = [24, LiteGraph.NODE_TITLE_HEIGHT + 24];
 
 const props = defineProps<{ graph: LoopGraph }>();
-const emit = defineEmits<{ dropType: [payload: { type: string; pos: [number, number] }] }>();
+const emit = defineEmits<{
+  dropType: [payload: { type: string; pos: [number, number] }];
+  select: [id: string | null];
+  link: [request: LinkRequest];
+}>();
 const canvasEl = ref<HTMLCanvasElement | null>(null);
 let canvas: LGraphCanvas | null = null;
 /**
@@ -140,10 +145,34 @@ onMounted(async () => {
   // so text survives the fit and one zoom step out.
   canvas.low_quality_zoom_threshold = 0.5;
   shown = view;
+  // Every edit goes through the daemon (ruling 2 in the plan): litegraph's own menus would remove,
+  // clone or recolour a card, or delete a link, on the canvas alone. The inspector holds the actions.
   canvas.allow_searchbox = false;
   canvas.show_info = false;
+  canvas.processContextMenu = () => {};
+  canvas.showLinkMenu = () => false;
+  LiteGraph.release_link_on_empty_shows_menu = false;
   canvas.ds.offset = [...VIEW_MARGIN];
   canvas.onNodeMoved = () => saves.schedule(props.graph.project.path);
+  canvas.onNodeSelected = (node) => emit("select", String(node.id));
+  canvas.onNodeDeselected = () => { if (canvas && canvas.selectedItems.size === 0) emit("select", null); };
+  const events = canvas.linkConnector.events;
+  // A link dropped on a card's body: ask the daemon for the edge and let litegraph connect nothing.
+  events.addEventListener("dropped-on-node", (event) => {
+    event.preventDefault();
+    if (!canvas) return;
+    // renderLinks' type also covers a drag to/from a subgraph boundary node, which this app never
+    // shows; every real drag here starts and ends on an LGraphNode card.
+    const request = linkRequestFrom(canvas.linkConnector.renderLinks as unknown as DraggedLink[], event.detail.node);
+    if (request) emit("link", request);
+  });
+  // A link dropped on empty canvas would otherwise disconnect a moved link; nothing is moved here.
+  events.addEventListener("dropped-on-canvas", (event) => event.preventDefault());
+  // Existing links belong to the daemon: they cannot be picked up and moved.
+  events.addEventListener("before-move-input", (event) => event.preventDefault());
+  events.addEventListener("before-move-output", (event) => event.preventDefault());
+  // Whatever litegraph did with a dropped link, the daemon's graph is the truth: redraw from it.
+  events.addEventListener("after-drop-links", () => { void show(props.graph); });
   fit();
   window.addEventListener("resize", fit);
   await show(props.graph);
