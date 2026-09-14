@@ -21,4 +21,12 @@ export default {
     const interval = v.interval === "" || v.interval == null ? undefined : Number(v.interval);
     return { loopType: "timeBased", triggerPrompt: v.prompt, heartbeatIntervalSeconds: interval, modelTier: v.model, backend: v.backend };
   },
+  fromLoop(n) {
+    return {
+      prompt: n.triggerPrompt ?? "",
+      interval: n.heartbeatIntervalSeconds ?? null,
+      model: n.modelTier ?? "standard",
+      backend: n.backend ?? "claudeCode",
+    };
+  },
 };

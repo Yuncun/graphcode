@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { loadNodeTypes, validateNodeType } from "../app/nodes/registry.ts";
+import type { LoopNode } from "../app/daemon/protocol.ts";
+import { defByName, loadNodeTypes, TYPE_FOR_LOOP_TYPE, typeForLoop, validateNodeType, valuesForLoop, type NodeTypeEntry } from "../app/nodes/registry.ts";
 
 const good = { default: { title: "Goal loop", category: "agent", description: "d", widgets: [{ name: "summary", type: "text", required: true }], toDraft: () => ({ loopType: "goalBased" }) } };
 
@@ -63,5 +64,49 @@ describe("loadNodeTypes", () => {
   it("throws when the listing itself fails", async () => {
     const failing = (async () => ({ ok: false, status: 500 }) as unknown as Response) as unknown as typeof fetch;
     await expect(loadNodeTypes("/p", importer, failing)).rejects.toThrow("node type listing failed: HTTP 500");
+  });
+});
+
+const goalMod = {
+  default: {
+    title: "Goal", category: "agent",
+    widgets: [{ name: "summary", type: "text" }, { name: "model", type: "combo", values: ["fast", "standard"], default: "standard" }],
+    toDraft: () => ({ loopType: "goalBased" }),
+    fromLoop: (n: LoopNode) => ({ summary: n.goal?.summary ?? "" }),
+  },
+};
+const loop = (loopType: LoopNode["loopType"], extra: Partial<LoopNode> = {}): LoopNode => ({ id: "L", title: "L", loopType, state: { idle: {} }, createdAt: 0, pausesBeforeWritesOnly: false, pilotState: "notPiloted", ...extra });
+
+describe("fromLoop", () => {
+  it("is optional, and must be a function when present", () => {
+    expect(validateNodeType("agent/goal", goalMod).fromLoop).toBeTypeOf("function");
+    expect(validateNodeType("agent/goal", { default: { ...goalMod.default, fromLoop: undefined } }).fromLoop).toBeUndefined();
+    expect(() => validateNodeType("agent/goal", { default: { ...goalMod.default, fromLoop: "nope" } })).toThrow("fromLoop must be a function");
+  });
+
+  it("valuesForLoop lays the module's answer over the widget defaults", () => {
+    const def = validateNodeType("agent/goal", goalMod);
+    expect(valuesForLoop(def, loop("goalBased", { goal: { summary: "ship it" } }))).toEqual({ summary: "ship it", model: "standard" });
+    const noFrom = validateNodeType("agent/goal", { default: { ...goalMod.default, fromLoop: undefined } });
+    expect(valuesForLoop(noFrom, loop("goalBased", { goal: { summary: "ship it" } }))).toEqual({ summary: "", model: "standard" });
+  });
+});
+
+describe("typeForLoop / defByName", () => {
+  const entries: NodeTypeEntry[] = [
+    { type: "agent/goal", source: "project", ok: true, def: validateNodeType("agent/goal", goalMod) },
+    { type: "agent/timed", source: "builtin", ok: false, error: "broken" },
+  ];
+
+  it("maps every loop type to a built-in name", () => {
+    expect(TYPE_FOR_LOOP_TYPE).toEqual({ goalBased: "agent/goal", timeBased: "agent/timed", sketch: "agent/main", turnBased: "agent/turn", proactive: "group/composite" });
+  });
+
+  it("finds the loaded entry for a loop type, and null when it is broken or absent", () => {
+    expect(typeForLoop(entries, "goalBased")?.title).toBe("Goal");
+    expect(typeForLoop(entries, "timeBased")).toBe(null);
+    expect(typeForLoop(entries, "turnBased")).toBe(null);
+    expect(defByName(entries, "agent/goal")?.title).toBe("Goal");
+    expect(defByName(entries, "agent/timed")).toBe(null);
   });
 });

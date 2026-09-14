@@ -30,4 +30,13 @@ export default {
       backend: v.backend,
     };
   },
+  fromLoop(n) {
+    return {
+      instruction: n.firstInstruction ?? "",
+      check: n.checkDescription ?? "",
+      pauseWrites: Boolean(n.pausesBeforeWritesOnly),
+      model: n.modelTier ?? "standard",
+      backend: n.backend ?? "claudeCode",
+    };
+  },
 };

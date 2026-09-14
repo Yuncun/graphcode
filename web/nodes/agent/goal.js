@@ -1,5 +1,4 @@
-// A goal loop runs unattended until its predicate command exits 0. The daemon starts it the moment
-// it is created, which is why the inspector asks for this brief before anything is sent.
+// A goal loop runs unattended until its predicate command exits 0. The daemon starts it the moment it is created, which is why a card stays a draft until Start.
 export default {
   type: "agent/goal",
   title: "Goal loop",
@@ -25,6 +24,14 @@ export default {
       modelTier: v.model,
       backend: v.backend,
       goal: { summary: v.summary, predicate: v.predicate || undefined },
+    };
+  },
+  fromLoop(n) {
+    return {
+      summary: n.goal?.summary ?? "",
+      predicate: n.goal?.predicate ?? "",
+      model: n.modelTier ?? "standard",
+      backend: n.backend ?? "claudeCode",
     };
   },
 };

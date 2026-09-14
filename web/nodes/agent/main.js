@@ -18,4 +18,7 @@ export default {
   toDraft(v) {
     return { loopType: "sketch", firstInstruction: v.note || undefined, backend: v.backend };
   },
+  fromLoop(n) {
+    return { note: n.firstInstruction ?? "", backend: n.backend ?? "claudeCode" };
+  },
 };

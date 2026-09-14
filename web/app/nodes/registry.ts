@@ -1,5 +1,5 @@
-import type { EdgeCondition, EdgeKind, NodeDraft } from "../daemon/protocol.ts";
-import { validateWidgets, type WidgetDef, type WidgetValues } from "./widgets.ts";
+import type { EdgeCondition, EdgeKind, LoopNode, LoopType, NodeDraft } from "../daemon/protocol.ts";
+import { defaultValues, validateWidgets, type WidgetDef, type WidgetValues } from "./widgets.ts";
 
 export interface SlotDef { name: string; type: EdgeKind; condition?: EdgeCondition }
 
@@ -13,6 +13,8 @@ export interface NodeTypeDef {
   outputs: SlotDef[];
   widgets: WidgetDef[];
   toDraft(values: WidgetValues): Partial<NodeDraft>;
+  /** Widget values for a loop the daemon reports, so a live card shows what it was given. Optional. */
+  fromLoop?(node: LoopNode): WidgetValues;
 }
 
 export type NodeTypeEntry =
@@ -46,6 +48,7 @@ export function validateNodeType(type: string, mod: unknown): NodeTypeDef {
   if (typeof m.title !== "string" || !m.title.trim()) throw new Error("title must be a non-empty string");
   if (typeof m.category !== "string" || !m.category.trim()) throw new Error("category must be a non-empty string");
   if (typeof m.toDraft !== "function") throw new Error("toDraft must be a function");
+  if (m.fromLoop !== undefined && typeof m.fromLoop !== "function") throw new Error("fromLoop must be a function");
   return {
     type,
     title: m.title,
@@ -55,6 +58,7 @@ export function validateNodeType(type: string, mod: unknown): NodeTypeDef {
     outputs: slots(m.outputs, "outputs"),
     widgets: validateWidgets(m.widgets),
     toDraft: m.toDraft as NodeTypeDef["toDraft"],
+    fromLoop: m.fromLoop as NodeTypeDef["fromLoop"],
   };
 }
 
@@ -76,4 +80,27 @@ export async function loadNodeTypes(project: string | null, importer: ModuleImpo
       return { type: t.type, source: t.source, ok: false as const, error: error instanceof Error ? error.message : String(error) };
     }
   }));
+}
+
+/** The built-in type a live loop is drawn as. A user or project pack that overrides the name is used instead (pack precedence). */
+export const TYPE_FOR_LOOP_TYPE: Record<LoopType, string> = {
+  goalBased: "agent/goal",
+  timeBased: "agent/timed",
+  sketch: "agent/main",
+  turnBased: "agent/turn",
+  proactive: "group/composite",
+};
+
+export function defByName(entries: NodeTypeEntry[], type: string): NodeTypeDef | null {
+  const entry = entries.find((e) => e.type === type);
+  return entry && entry.ok ? entry.def : null;
+}
+
+export function typeForLoop(entries: NodeTypeEntry[], loopType: LoopType): NodeTypeDef | null {
+  return defByName(entries, TYPE_FOR_LOOP_TYPE[loopType]);
+}
+
+/** Widget values for a live loop: the type's defaults under whatever its `fromLoop` reports. */
+export function valuesForLoop(def: NodeTypeDef, node: LoopNode): WidgetValues {
+  return { ...defaultValues(def.widgets), ...(def.fromLoop ? def.fromLoop(node) : {}) };
 }
