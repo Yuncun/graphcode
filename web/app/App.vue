@@ -2,16 +2,15 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { createStore } from "./daemon/store.ts";
 import { DaemonConnection, type ConnectionStatus } from "./daemon/connection.ts";
-import type { DaemonCommand, NodeDraft } from "./daemon/protocol.ts";
-import { edgeSpec, graphCommand } from "./daemon/protocol.ts";
+import type { DaemonCommand } from "./daemon/protocol.ts";
+import { graphCommand } from "./daemon/protocol.ts";
 import { loadNodeTypes, type NodeTypeEntry } from "./nodes/registry.ts";
-import type { LinkRequest } from "./canvas/linkRequest.ts";
 import GraphCanvas from "./canvas/GraphCanvas.vue";
 import ProjectTabs from "./tabs/ProjectTabs.vue";
 import Sidebar from "./sidebar/Sidebar.vue";
 import NodesPanel from "./sidebar/NodesPanel.vue";
 import WorkflowsPanel from "./sidebar/WorkflowsPanel.vue";
-import Inspector, { type PendingCreate } from "./inspector/Inspector.vue";
+import Inspector from "./inspector/Inspector.vue";
 
 const store = createStore();
 /** Holds the canvas so a project being closed can have its pending layout save written first. */
@@ -93,30 +92,6 @@ async function reloadNodeTypes() {
 // activeGraph) never asks the bridge for a listing, so its own errorOccurred is what the footer shows.
 watch(confirmedProject, () => { void reloadNodeTypes(); }, { immediate: true });
 
-/** A node type dropped on the canvas, waiting for its brief to be confirmed. */
-const pending = ref<PendingCreate | null>(null);
-
-function onDropType({ type, pos }: { type: string; pos: [number, number] }) {
-  const entry = nodeTypes.value.find((e) => e.type === type);
-  if (!entry || !entry.ok) { store.pushError(`node type ${type} is not loaded`); return; }
-  pending.value = { def: entry.def, pos };
-}
-
-/** The brief is confirmed: tell the daemon, then reserve the drop position. A goal loop starts on creation. */
-function onCreate(draft: NodeDraft) {
-  const project = active.value;
-  const drop = pending.value;
-  if (!project || !drop) return;
-  if (!send(graphCommand(project, { createNode: { _0: draft } }))) return;
-  // The daemon answers over the socket, so the reservation is in place before its graphChanged can arrive.
-  canvasView.value?.reserveLayout(project, draft.id, drop.pos);
-  pending.value = null;
-}
-
-function onLink(request: LinkRequest) {
-  if (!active.value) return;
-  send(graphCommand(active.value, { createEdge: { from: request.from, to: request.to, spec: edgeSpec(request.kind, request.condition) } }));
-}
 function onRename(id: string, title: string) { if (active.value) send(graphCommand(active.value, { renameNode: { _0: id, title } })); }
 function onStop(id: string) { if (active.value) send(graphCommand(active.value, { stopNode: { _0: id } })); }
 function onRestart(id: string) { if (active.value) send(graphCommand(active.value, { restartNode: { _0: id } })); }
@@ -124,8 +99,8 @@ function onDetach(id: string) { if (active.value) send(graphCommand(active.value
 function onRemove(id: string) { if (active.value) send(graphCommand(active.value, { deleteNode: { _0: id } })); }
 function onDeleteEdge(edgeID: string) { if (active.value) send(graphCommand(active.value, { deleteEdge: { _0: edgeID } })); }
 
-// A dropped brief and a selected card both belong to the project they came from; a tab change clears both.
-watch(active, () => { pending.value = null; selected.value = null; });
+// A selected card belongs to the project it came from; a tab change clears it.
+watch(active, () => { selected.value = null; });
 
 onMounted(() => {
   (window as unknown as { __graphcode: unknown }).__graphcode = {
@@ -150,10 +125,10 @@ onMounted(() => {
         <template #workflows><WorkflowsPanel :recent="store.recent" @open="openProject" /></template>
       </Sidebar>
       <section class="center">
-        <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" @drop-type="onDropType" @select="selected = $event" @link="onLink" />
+        <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" :node-types="nodeTypes" @select="selected = $event" />
         <div v-else class="empty" data-testid="empty">{{ status === "open" ? "No open projects. Press + to open a folder." : "Connecting to graphcoded…" }}</div>
       </section>
-      <Inspector :pending="pending" :node="selectedNode" :graph="activeGraph" @create="onCreate" @cancel="pending = null" @rename="onRename" @stop="onStop" @restart="onRestart" @detach="onDetach" @remove="onRemove" @delete-edge="onDeleteEdge" />
+      <Inspector :pending="null" :node="selectedNode" :graph="activeGraph" @rename="onRename" @stop="onStop" @restart="onRestart" @detach="onDetach" @remove="onRemove" @delete-edge="onDeleteEdge" />
     </div>
     <footer class="status" data-testid="status">{{ status }}<span v-if="lastError" class="error"> · {{ lastError }}</span></footer>
   </main>

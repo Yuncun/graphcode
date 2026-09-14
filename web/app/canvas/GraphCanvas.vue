@@ -3,13 +3,14 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { LGraph, LGraphCanvas, LiteGraph } from "@comfyorg/litegraph";
 import "@comfyorg/litegraph/style.css";
 import type { LoopGraph } from "../daemon/protocol.ts";
+import type { NodeTypeEntry } from "../nodes/registry.ts";
 import { NODE_TYPE_MIME } from "../sidebar/library.ts";
 import { GraphAdapter } from "./adapter.ts";
 import type { CanvasDoc } from "./document.ts";
+import { FieldEditor } from "./FieldEditor.ts";
 import { getLayout, putLayout } from "./layoutClient.ts";
 import { linkRequestFrom, type DraggedLink, type LinkRequest } from "./linkRequest.ts";
-import { onUserLinkDrop } from "./LoopCardNode.ts";
-import { mergeReserved, type Reservation } from "./reserved.ts";
+import { LoopCardNode, onUserLinkDrop, outputSlotFor, type CardAction, type CardHost } from "./LoopCardNode.ts";
 import { createSaveScheduler } from "./saveScheduler.ts";
 import { applyViewport, fitToNodes, readViewport, type Viewport } from "./viewport.ts";
 
@@ -18,9 +19,10 @@ interface ProjectView {
   layout: CanvasDoc;
   /** null until the first fit; then the last pan and zoom seen on this project. */
   viewport: Viewport | null;
-  /** Positions reserved for nodes the daemon has not reported yet, keyed by the id the app minted. */
-  pending: Map<string, Reservation>;
 }
+
+/** What the toolbar shows: how many drafts and draft wires wait for Start. */
+export interface DocumentCounts { drafts: number; wires: number }
 
 const SAVE_DELAY_MS = 500;
 /**
@@ -29,48 +31,82 @@ const SAVE_DELAY_MS = 500;
  * the view started exactly at the corner of the graph. Start it a little way in instead.
  */
 const VIEW_MARGIN: [number, number] = [24, LiteGraph.NODE_TITLE_HEIGHT + 24];
-/** GraphCanvas does not yet drive card interaction (Task 6): a card built here never needs a real host. */
-const STUB_HOST = { onChanged() {}, onAction() {}, onEditField() {}, onRename() {} };
 
-const props = defineProps<{ graph: LoopGraph }>();
+const props = defineProps<{ graph: LoopGraph; nodeTypes: NodeTypeEntry[] }>();
 const emit = defineEmits<{
-  dropType: [payload: { type: string; pos: [number, number] }];
   select: [id: string | null];
-  link: [request: LinkRequest];
+  action: [id: string, action: CardAction];
+  rename: [id: string, title: string];
+  /** The Delete key on live cards: the daemon's to delete, so App asks first. */
+  deleteLive: [ids: string[]];
+  /** A live edge picked off its input: likewise. */
+  deleteEdge: [edgeID: string];
+  documentChanged: [counts: DocumentCounts];
+  problem: [message: string];
 }>();
+const hostEl = ref<HTMLDivElement | null>(null);
 const canvasEl = ref<HTMLCanvasElement | null>(null);
 let canvas: LGraphCanvas | null = null;
+let editor: FieldEditor | null = null;
 /**
- * One litegraph graph per project path, so switching tabs keeps each project's cards and
- * viewport. The map holds the in-flight load of the saved layout rather than the finished
- * view, so two shows of the same project cannot race into building two graphs for it.
+ * One litegraph graph per project path, so switching tabs keeps each project's cards, drafts and
+ * viewport. The map holds the in-flight load of the saved layout rather than the finished view,
+ * so two shows of the same project cannot race into building two graphs for it.
  */
 const views = new Map<string, Promise<ProjectView>>();
-/** Views whose layout has loaded; the debug hooks read from here because they cannot await. */
+/** Views whose layout has loaded; the exposed methods read from here because they cannot await. */
 const resolved = new Map<string, ProjectView>();
 /** Debounced per project, so a move in one project cannot cancel another's pending write. */
 const saves = createSaveScheduler({ delayMs: SAVE_DELAY_MS, save });
 /** Counts show() calls, so a slow one cannot put its project back on screen after a newer one. */
 let shows = 0;
-/** The view whose graph the canvas is drawing, so its pan and zoom can be saved when the tab changes. */
+/** The view whose graph the canvas is drawing. */
 let shown: ProjectView | null = null;
+
+/** What every card asks of the canvas. */
+const host: CardHost = {
+  onChanged: () => changed(),
+  onAction: (card, action) => emit("action", String(card.id), action),
+  onEditField: (card, widget) => {
+    if (canvas && editor) editor.open(canvas, card, widget, (text) => card.setFieldValue(widget, text));
+  },
+  onRename: (card, title) => emit("rename", String(card.id), title),
+};
 
 function viewFor(project: string): Promise<ProjectView> {
   let view = views.get(project);
   if (!view) {
-    view = getLayout(project).then((layout) => ({ adapter: new GraphAdapter(new LGraph(), STUB_HOST), layout, viewport: null, pending: new Map() }));
+    view = getLayout(project).then((layout) => {
+      const adapter = new GraphAdapter(new LGraph(), host);
+      adapter.types = props.nodeTypes;
+      return { adapter, layout, viewport: null };
+    });
     views.set(project, view);
     view.then((v) => resolved.set(project, v));
   }
   return view;
 }
 
+function counts(view: ProjectView): DocumentCounts {
+  return { drafts: view.adapter.drafts().length, wires: view.adapter.draftEdges().length };
+}
+
+/** The document changed by the user's hand: save it, and tell the toolbar what waits for Start. */
+function changed(): void {
+  const view = shown;
+  if (!view) return;
+  saves.schedule(props.graph.project.path);
+  emit("documentChanged", counts(view));
+}
+
 async function show(graph: LoopGraph): Promise<void> {
   const token = ++shows;
   const view = await viewFor(graph.project.path);
+  view.adapter.types = props.nodeTypes;
   view.adapter.sync(graph, view.layout);
   if (token !== shows || !canvas) return;
   if (canvas.graph !== view.adapter.lgraph) {
+    editor?.close(true);
     // litegraph keeps one pan and zoom per canvas, not per graph, so carry them by hand.
     if (shown) shown.viewport = readViewport(canvas.ds);
     canvas.setGraph(view.adapter.lgraph);
@@ -79,39 +115,24 @@ async function show(graph: LoopGraph): Promise<void> {
   }
   // First time this project has cards on screen: bring them all into view. litegraph only
   // measures a card's boundingRect once per render frame, so a card just added by sync() above
-  // still reads as zero-sized until computeVisibleNodes() (normally run inside the render loop)
-  // has measured it at least once.
+  // still reads as zero-sized until computeVisibleNodes() has measured it at least once.
   if (!view.viewport && view.adapter.lgraph.nodes.length) {
     canvas.computeVisibleNodes();
     if (fitToNodes(canvas, view.adapter.lgraph.nodes)) view.viewport = readViewport(canvas.ds);
   }
   canvas.setDirty(true, true);
+  emit("documentChanged", counts(view));
 }
 
 async function save(project: string): Promise<void> {
   const view = await views.get(project);
   if (!view) return;
-  view.layout = { ...view.layout, nodes: view.adapter.document().nodes };
+  view.layout = view.adapter.document();
   try {
     await putLayout(project, view.layout);
   } catch (error) {
     console.warn("graphcode: could not save the canvas layout", error);
   }
-}
-
-/**
- * The card for a node the daemon is about to report must land where it was dropped: the position is
- * written into the layout now under the id the app minted, and `placeNodes` honours it on the sync
- * that brings the node. The caller only reserves once the daemon has actually accepted the create, so
- * a reservation is only ever made for a node that should eventually exist; `mergeReserved` still expires
- * it (RESERVE_TTL_MS) in case the daemon's answer never arrives.
- */
-function reserveLayout(project: string, id: string, pos: [number, number]): void {
-  const view = resolved.get(project);
-  if (!view) return;
-  view.layout.nodes[id] = { pos };
-  view.pending.set(id, { pos, at: Date.now() });
-  saves.schedule(project);
 }
 
 function onDragOver(event: DragEvent) {
@@ -120,13 +141,30 @@ function onDragOver(event: DragEvent) {
   event.dataTransfer.dropEffect = "copy";
 }
 
+/** A node type dropped from the library: a draft card, at once, where the cursor is. Nothing is sent. */
 function onDrop(event: DragEvent) {
   const type = event.dataTransfer?.getData(NODE_TYPE_MIME);
-  if (!type || !canvas) return;
+  const view = shown;
+  if (!type || !canvas || !view) return;
   event.preventDefault();
-  // Graph-space point under the cursor; it becomes the new card's top-left.
   const [x, y] = canvas.convertEventToCanvasOffset(event);
-  emit("dropType", { type, pos: [x, y] });
+  const card = view.adapter.addDraft(type, [x, y]);
+  if (!card) {
+    emit("problem", `node type ${type} is not loaded`);
+    return;
+  }
+  canvas.selectNode(card);
+  changed();
+}
+
+/** A drag from an output onto a card: a draft wire, whatever the two cards are (plan ruling 2). */
+function draftLink(request: LinkRequest): void {
+  const view = shown;
+  if (!view) return;
+  const from = view.adapter.card(request.from);
+  const to = view.adapter.card(request.to);
+  if (!from || !to) return;
+  if (view.adapter.addDraftLink(from, outputSlotFor(request.kind, request.condition), to)) changed();
 }
 
 function fit(): void {
@@ -142,51 +180,84 @@ function fit(): void {
 onMounted(async () => {
   const view = await viewFor(props.graph.project.path);
   const element = canvasEl.value;
-  if (!element) return;
+  const hostElement = hostEl.value;
+  if (!element || !hostElement) return;
   // The constructor starts litegraph's render loop; stopRendering() below pairs with it.
   canvas = new LGraphCanvas(element, view.adapter.lgraph);
+  editor = new FieldEditor(hostElement);
   // litegraph stops drawing text below this scale (its default is 0.6); the fit floor is 0.6,
   // so text survives the fit and one zoom step out.
   canvas.low_quality_zoom_threshold = 0.5;
   shown = view;
-  // Every edit goes through the daemon (ruling 2 in the plan): litegraph's own menus would remove,
-  // clone or recolour a card, or delete a link, on the canvas alone. The inspector holds the actions.
+  // litegraph's own menus would remove, clone or recolour a card, or delete a link, on the canvas
+  // alone (plan ruling 1). Every action here has one path: the card's buttons, the Delete key, or a wire drag.
   canvas.allow_searchbox = false;
   canvas.show_info = false;
   canvas.processContextMenu = () => {};
   canvas.showLinkMenu = () => false;
   LiteGraph.release_link_on_empty_shows_menu = false;
   canvas.ds.offset = [...VIEW_MARGIN];
-  canvas.onNodeMoved = () => saves.schedule(props.graph.project.path);
+  canvas.onNodeMoved = () => changed();
   // litegraph calls this on both a select and a deselectAll (an empty-canvas click goes through
   // deselectAll, which skips onNodeDeselected entirely); a multi-selection shows the hint (null).
   canvas.onSelectionChange = (selected) => {
     const ids = Object.keys(selected);
     emit("select", ids.length === 1 ? ids[0]! : null);
   };
-  // A user's drop on a card's *input dot* (only a card with an existing incoming edge has one)
-  // never reaches the link connector's events; LoopCardNode reports it here instead.
+  // The editor sits over its field; pan and zoom move the field, so it is placed again once per frame.
+  canvas.onDrawForeground = () => editor?.reposition();
+  // The Delete key. litegraph would remove every selected node; `block_delete` on the cards makes
+  // that a no-op, so this decides instead: a draft goes at once, a live card is the daemon's.
+  const clearSelection = canvas.deleteSelected.bind(canvas);
+  canvas.deleteSelected = () => {
+    const current = shown;
+    if (!canvas || !current || editor?.isOpen()) return;
+    const cards = [...canvas.selectedItems].filter((item): item is LoopCardNode => item instanceof LoopCardNode);
+    const drafts = cards.filter((c) => c.cardMode !== "live").map((c) => String(c.id));
+    const live = cards.filter((c) => c.cardMode === "live").map((c) => String(c.id));
+    if (drafts.length) {
+      current.adapter.removeDrafts(drafts);
+      changed();
+    }
+    clearSelection();
+    if (live.length) emit("deleteLive", live);
+  };
+  // A user's drop on a card's *input dot* (only a card with an existing wire has one) never
+  // reaches the link connector's events; LoopCardNode reports it here instead.
   onUserLinkDrop(({ from, to, fromSlotIndex }) => {
     const request = linkRequestFrom([{ node: from, fromSlotIndex, toType: "input" }], to);
-    if (request) emit("link", request);
+    if (request) draftLink(request);
   });
   const events = canvas.linkConnector.events;
-  // A link dropped on a card's body: ask the daemon for the edge and let litegraph connect nothing.
+  // A link dropped on a card's body: draw the draft wire ourselves and let litegraph connect nothing.
   events.addEventListener("dropped-on-node", (event) => {
     event.preventDefault();
     if (!canvas) return;
     // renderLinks' type also covers a drag to/from a subgraph boundary node, which this app never
     // shows; every real drag here starts and ends on an LGraphNode card.
     const request = linkRequestFrom(canvas.linkConnector.renderLinks as unknown as DraggedLink[], event.detail.node);
-    if (request) emit("link", request);
+    if (request) draftLink(request);
   });
-  // A link dropped on empty canvas would otherwise disconnect a moved link; nothing is moved here.
-  events.addEventListener("dropped-on-canvas", (event) => event.preventDefault());
-  // Existing links belong to the daemon: they cannot be picked up and moved.
-  events.addEventListener("before-move-input", (event) => event.preventDefault());
+  // Picking a wire off its input. A draft wire is the user's to move or drop (litegraph carries
+  // it; dropping it on empty canvas removes it). A live edge is the daemon's, so App asks first.
+  events.addEventListener("before-move-input", (event) => {
+    const current = shown;
+    if (!current) return;
+    const linkID = (event.detail as { link?: { id: number } }).link?.id;
+    if (linkID === undefined || current.adapter.isDraftLink(linkID)) return;
+    event.preventDefault();
+    const edgeID = current.adapter.edgeIDForLink(linkID);
+    if (edgeID) emit("deleteEdge", edgeID);
+  });
+  // An output carries every wire leaving it; moving all of them at once is not a gesture here.
   events.addEventListener("before-move-output", (event) => event.preventDefault());
-  // Whatever litegraph did with a dropped link, the daemon's graph is the truth: redraw from it.
-  events.addEventListener("after-drop-links", () => { void show(props.graph); });
+  // Whatever litegraph did with a dropped wire, reconcile: adopt a moved draft wire, forget a dropped one, prune empty inputs.
+  events.addEventListener("after-drop-links", () => {
+    const current = shown;
+    if (!current) return;
+    current.adapter.sync(props.graph, current.layout);
+    changed();
+  });
   fit();
   window.addEventListener("resize", fit);
   await show(props.graph);
@@ -199,30 +270,46 @@ watch(() => props.graph, (graph, previous) => {
   void show(graph);
 }, { deep: true });
 
-/**
- * App.vue closes a project that is not the one on screen without the watch above ever firing,
- * so it calls this: write the move the user made just before closing, and drop the timer with it.
- */
+// A project's cards are drawn from its node types; when a pack loads or reloads, every view learns it.
+watch(() => props.nodeTypes, (types) => {
+  for (const view of resolved.values()) view.adapter.types = types;
+  void show(props.graph);
+});
+
 defineExpose({
+  /** App.vue closes a project that is not the one on screen without the watch above ever firing, so it calls this. */
   flushSave: (project: string) => saves.flush(project),
   positions: (project: string) => resolved.get(project)?.adapter.document().nodes,
   viewport: () => canvas ? { scale: canvas.ds.scale, offset: [canvas.ds.offset[0], canvas.ds.offset[1]] as [number, number], width: canvas.canvas.width, height: canvas.canvas.height } : undefined,
-  reserveLayout,
+  adapter: (project: string) => resolved.get(project)?.adapter,
+  /** App changed a project's document through its adapter (a start, a load): save and recount. */
+  touch: (project: string) => {
+    if (shown && props.graph.project.path === project) changed();
+    else saves.schedule(project);
+  },
+  cards: (project: string) => resolved.get(project)?.adapter.cards().map((c) => ({ id: String(c.id), mode: c.cardMode, title: c.title, values: { ...c.values }, pos: [c.pos[0], c.pos[1]] as [number, number], size: [c.size[0], c.size[1]] as [number, number] })),
+  document: (project: string) => resolved.get(project)?.adapter.document(),
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", fit);
   onUserLinkDrop(null);
+  editor?.close(false);
   canvas?.stopRendering();
   canvas = null;
 });
 </script>
 
 <template>
-  <div class="canvas-host" @dragover="onDragOver" @drop="onDrop"><canvas ref="canvasEl"></canvas></div>
+  <div ref="hostEl" class="canvas-host" @dragover="onDragOver" @drop="onDrop"><canvas ref="canvasEl"></canvas></div>
 </template>
 
 <style scoped>
-.canvas-host { flex: 1; min-height: 0; position: relative; }
+.canvas-host { flex: 1; min-height: 0; position: relative; overflow: hidden; }
 canvas { display: block; width: 100%; height: 100%; }
+</style>
+
+<style>
+/* Created by FieldEditor.ts, outside Vue's scoping. */
+.field-editor { position: absolute; box-sizing: border-box; margin: 0; background: #17191d; color: #e8e6e1; border: 1px solid #3b7dd8; border-radius: 2px; font-family: -apple-system, "Helvetica Neue", sans-serif; resize: none; outline: none; z-index: 2; }
 </style>
