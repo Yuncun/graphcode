@@ -38,6 +38,14 @@ describe("buildDraft", () => {
     expect(d.id).toBe("ID-5");
     expect(d.title).toBe("Given Title");
   });
+
+  it("refuses a toDraft whose backend is not a real BackendKind", () => {
+    expect(() => buildDraft(def(() => ({ loopType: "sketch", backend: "banana" }) as never), {}, "", "ID-6")).toThrow('t/t: toDraft returned unknown backend "banana"');
+  });
+
+  it("refuses a toDraft whose modelTier is not a real ModelTier", () => {
+    expect(() => buildDraft(def(() => ({ loopType: "sketch", modelTier: "banana" }) as never), {}, "", "ID-7")).toThrow('t/t: toDraft returned unknown modelTier "banana"');
+  });
 });
 
 describe("draftProblems", () => {
@@ -51,11 +59,21 @@ describe("draftProblems", () => {
     expect(draftProblems({ ...base, loopType: "proactive", title: "Group" })).toEqual([]);
   });
 
-  it("asks a timed loop for a prompt, and for an interval or a /loop directive", () => {
-    expect(draftProblems({ ...base, loopType: "timeBased" })).toEqual(["A timed loop needs a prompt.", "Give an interval, or put a /loop directive in the prompt."]);
-    expect(draftProblems({ ...base, loopType: "timeBased", triggerPrompt: "/loop 10m tidy" })).toEqual([]);
+  it("asks a timed loop for a prompt, and a backend without in-session recurrence for an interval or a /loop directive", () => {
+    expect(draftProblems({ ...base, loopType: "timeBased", backend: "codex" })).toEqual(["A timed loop needs a prompt.", "On Codex, OpenCode or Pi give an interval, or put a /loop directive in the prompt."]);
+    expect(draftProblems({ ...base, loopType: "timeBased", backend: "codex", triggerPrompt: "tidy" })).toEqual(["On Codex, OpenCode or Pi give an interval, or put a /loop directive in the prompt."]);
+    expect(draftProblems({ ...base, loopType: "timeBased", backend: "codex", triggerPrompt: "/loop 10m tidy" })).toEqual([]);
     expect(draftProblems({ ...base, loopType: "timeBased", triggerPrompt: "tidy", heartbeatIntervalSeconds: 60 })).toEqual([]);
     expect(draftProblems({ ...base, loopType: "timeBased", triggerPrompt: "tidy", heartbeatIntervalSeconds: 0 })).toEqual(["The interval must be a positive number of seconds."]);
     expect(draftProblems({ ...base, loopType: "timeBased", triggerPrompt: "tidy", heartbeatIntervalSeconds: Number.NaN })).toEqual(["The interval must be a positive number of seconds."]);
+  });
+
+  it("accepts a bare prompt for a timed loop on the default backend, which keeps its own cadence in-session", () => {
+    expect(draftProblems({ ...base, loopType: "timeBased", triggerPrompt: "tidy" })).toEqual([]);
+  });
+
+  it("refuses a composite on a backend without sub-agents, and accepts one on Claude Code", () => {
+    expect(draftProblems({ ...base, loopType: "proactive", title: "G", backend: "pi" })).toEqual(["A composite needs Claude Code or Copilot CLI (a backend with sub-agents)."]);
+    expect(draftProblems({ ...base, loopType: "proactive", title: "G", backend: "claudeCode" })).toEqual([]);
   });
 });

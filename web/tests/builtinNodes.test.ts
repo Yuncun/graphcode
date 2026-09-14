@@ -19,7 +19,7 @@ const expectedType: Record<string, string> = { "agent/goal": "goalBased", "agent
 
 describe("built-in node pack", () => {
   for (const type of Object.keys(filled)) {
-    it(`${type} validates and builds a draft the daemon would accept`, async () => {
+    it(`${type} validates and builds a draft the browser's mirror of NodeDraft.isValid accepts`, async () => {
       const def = validateNodeType(type, await load(type));
       const values = { ...defaultValues(def.widgets), ...filled[type] };
       const draft = buildDraft(def, values, titles[type] ?? "", "ID");
@@ -29,9 +29,10 @@ describe("built-in node pack", () => {
     });
   }
 
-  it("the timed loop defaults to an hourly heartbeat and the goal loop to standard on Claude Code", async () => {
+  it("the timed loop defaults to no heartbeat and the goal loop to standard on Claude Code", async () => {
     const timed = validateNodeType("agent/timed", await load("agent/timed"));
-    expect(buildDraft(timed, { ...defaultValues(timed.widgets), prompt: "p" }, "", "ID").heartbeatIntervalSeconds).toBe(3600);
+    expect(buildDraft(timed, { ...defaultValues(timed.widgets), prompt: "p" }, "", "ID").heartbeatIntervalSeconds).toBeUndefined();
+    expect(buildDraft(timed, { ...defaultValues(timed.widgets), prompt: "p", interval: 900 }, "", "ID").heartbeatIntervalSeconds).toBe(900);
     const goal = validateNodeType("agent/goal", await load("agent/goal"));
     const d = buildDraft(goal, { ...defaultValues(goal.widgets), summary: "s" }, "", "ID");
     expect(d.modelTier).toBe("standard");

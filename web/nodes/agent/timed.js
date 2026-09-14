@@ -12,8 +12,8 @@ export default {
     { name: "spawn", type: "spawn" },
   ],
   widgets: [
-    { name: "prompt", label: "Prompt", type: "text", multiline: true, required: true, placeholder: "What to do on every wake" },
-    { name: "interval", label: "Every (seconds)", type: "number", default: 3600, help: "Clear it to let a /loop directive in the prompt set the cadence." },
+    { name: "prompt", label: "Prompt", type: "text", multiline: true, required: true, placeholder: "What to do on every wake, e.g. /loop 10m check the CI run" },
+    { name: "interval", label: "Every (seconds)", type: "number", help: "Leave empty on Claude Code and Copilot CLI: they keep their own cadence from a /loop directive in the prompt (for example `/loop 10m`). Codex, OpenCode and Pi need a number here or a /loop directive." },
     { name: "model", label: "Model", type: "combo", values: ["fast", "standard", "capable"], default: "standard" },
     { name: "backend", label: "Backend", type: "combo", values: ["claudeCode", "copilotCLI", "codex", "openCode", "pi"], default: "claudeCode" },
   ],

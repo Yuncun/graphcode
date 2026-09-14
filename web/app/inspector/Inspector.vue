@@ -33,19 +33,22 @@ watch(() => props.pending, (p) => {
   id = newNodeID();
 }, { immediate: true });
 
-const draft = computed<NodeDraft | null>(() => {
-  if (!props.pending) return null;
-  try { return buildDraft(props.pending.def, values, title.value, id); } catch { return null; }
+const draftResult = computed<{ draft: NodeDraft | null; error: string | null }>(() => {
+  if (!props.pending) return { draft: null, error: null };
+  try { return { draft: buildDraft(props.pending.def, values, title.value, id), error: null }; }
+  catch (e) { return { draft: null, error: e instanceof Error ? e.message : String(e) }; }
 });
 
 const problems = computed<string[]>(() => {
   if (!props.pending) return [];
   const missing = missingRequired(props.pending.def.widgets, values).map((w) => `${w.label ?? w.name} is required.`);
-  return [...missing, ...(draft.value ? draftProblems(draft.value) : ["This node type's toDraft threw."])];
+  const { draft, error } = draftResult.value;
+  return [...missing, ...(draft ? draftProblems(draft) : [error!])];
 });
 
 function create() {
-  if (draft.value && problems.value.length === 0) emit("create", draft.value);
+  const { draft } = draftResult.value;
+  if (draft && problems.value.length === 0) emit("create", draft);
 }
 
 // Selected loop.

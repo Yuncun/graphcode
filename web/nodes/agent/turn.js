@@ -4,7 +4,7 @@ export default {
   type: "agent/turn",
   title: "Turn loop",
   category: "agent",
-  description: "Works one turn at once and waits for you between turns.",
+  description: "Works one turn per round and waits for you between turns.",
   inputs: [{ name: "start", type: "handoff" }],
   outputs: [
     { name: "handoff", type: "handoff", condition: "always" },

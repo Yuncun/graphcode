@@ -206,17 +206,29 @@ test.describe("phase 1 surface", () => {
     await shot(page, "P1-06-rejected");
   });
 
-  test("P1-07 a timed loop carries the default hourly heartbeat", async ({ page }) => {
+  test("P1-07 a timed loop sends no interval unless one is given", async ({ page }) => {
     h = await launch();
     await openAlpha(page, h);
     await dropType(page, "agent/timed", await emptyPoint(page));
-    await expect(page.getByTestId("widget-interval")).toHaveValue("3600");
+    await expect(page.getByTestId("widget-interval")).toHaveValue("");
     await page.getByTestId("widget-prompt").fill("tidy the worktrees");
     await page.getByTestId("inspector-create").click();
     await expect.poll(() => receivedGraphCommands(h, "createNode").length).toBe(1);
-    expect(receivedGraphCommands(h, "createNode")[0]!.createNode._0).toMatchObject({ loopType: "timeBased", triggerPrompt: "tidy the worktrees", heartbeatIntervalSeconds: 3600 });
+    const draft = receivedGraphCommands(h, "createNode")[0]!.createNode._0;
+    expect(draft).toMatchObject({ loopType: "timeBased", triggerPrompt: "tidy the worktrees" });
+    expect(draft).not.toHaveProperty("heartbeatIntervalSeconds");
     await expect.poll(() => nodeCount(page, h.alpha)).toBe(10);
-    await shot(page, "P1-07-timed-created");
+    await shot(page, "P1-07-timed-no-interval");
+
+    const at = await emptyPoint(page);
+    await dropType(page, "agent/timed", { x: at.x + 220, y: at.y });
+    await page.getByTestId("widget-prompt").fill("run again");
+    await page.getByTestId("widget-interval").fill("900");
+    await page.getByTestId("inspector-create").click();
+    await expect.poll(() => receivedGraphCommands(h, "createNode").length).toBe(2);
+    const secondDraft = receivedGraphCommands(h, "createNode")[1]!.createNode._0;
+    expect(secondDraft.heartbeatIntervalSeconds).toBe(900);
+    await expect.poll(() => nodeCount(page, h.alpha)).toBe(11);
   });
 
   test("P1-08 a composite needs a name before Create is enabled", async ({ page }) => {
