@@ -1,6 +1,6 @@
 import { LGraph, LiteGraph, type LLink } from "@comfyorg/litegraph";
 import type { LoopEdge, LoopGraph } from "../daemon/protocol.ts";
-import { LoopCardNode, registerLoopCardNode } from "./LoopCardNode.ts";
+import { connectAsAdapter, LoopCardNode, registerLoopCardNode } from "./LoopCardNode.ts";
 import { placeNodes } from "./placement.ts";
 
 export interface CanvasNodeLayout { pos: [number, number]; size?: [number, number] }
@@ -59,10 +59,15 @@ export class GraphAdapter {
       if (!from || !to) continue;
       to.addInput(edge.kind, edge.kind);
       const inputIndex = to.inputs.length - 1;
-      const link = from.connect(OUTPUT_SLOT[edge.kind], to, inputIndex);
+      const link = connectAsAdapter(() => from.connect(OUTPUT_SLOT[edge.kind], to, inputIndex));
       if (!link) continue;
       this.linkByEdge.set(edge.id, link);
     }
+    // The adapter is the graph's only writer. A card refuses a connection it did not make, but
+    // a link can still arrive another way (a restored session, a future paste), so anything on
+    // the graph that is not one of the daemon's edges is dropped here.
+    const drawn = new Set([...this.linkByEdge.values()].map((link) => link.id));
+    for (const id of [...this.lgraph.links.keys()]) if (!drawn.has(id)) this.lgraph.removeLink(id);
     // Colour follows the edge's condition every sync, not just at creation, so an edge whose
     // condition changes under a stable id (no retarget) still gets repainted.
     for (const [edgeID, link] of this.linkByEdge) {

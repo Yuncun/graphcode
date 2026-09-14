@@ -17,6 +17,24 @@ const stateWord: Record<LoopStateName, string> = {
   failed: "FAILED", stalled: "STALLED", waiting: "WAITING", stopped: "STOPPED",
 };
 
+/**
+ * litegraph asks both nodes before it makes any connection, and it uses that one path for a
+ * user dragging one slot onto another as well as for the adapter drawing the daemon's edges.
+ * Phase 0 never writes back to the daemon, so a link a user drew would be an edge the canvas
+ * shows and the daemon does not have. Only the adapter may connect, and it says so by putting
+ * its own `connect` call inside `connectAsAdapter`.
+ */
+let adapterIsConnecting = false;
+
+export function connectAsAdapter<T>(connect: () => T): T {
+  adapterIsConnecting = true;
+  try {
+    return connect();
+  } finally {
+    adapterIsConnecting = false;
+  }
+}
+
 /** One GraphCode loop drawn as a card: title bar in the type colour, state badge, live line, meta row. */
 export class LoopCardNode extends LGraphNode {
   static override title = "Loop";
@@ -30,6 +48,11 @@ export class LoopCardNode extends LGraphNode {
     super(title, "graphcode/loop");
     this.size = [...CARD_SIZE];
     this.resizable = false;
+    // The daemon owns the graph in phase 0, so a card cannot be deleted (Delete or Backspace on
+    // a selection, or the node menu) nor copied, cloned and pasted. Either would leave the
+    // canvas showing something the daemon never reported.
+    this.block_delete = true;
+    this.clonable = false;
     this.addOutput("handoff", "handoff");
     this.addOutput("message", "message");
     this.addOutput("spawn", "spawn");
@@ -45,6 +68,14 @@ export class LoopCardNode extends LGraphNode {
     this.live = liveLine(node);
     this.meta = `${typeLabel[node.loopType] ?? node.loopType} · ${ageLabel(node.createdAt)}${node.modelTier ? " · " + node.modelTier : ""}`;
     this.setDirtyCanvas(true, true);
+  }
+
+  override onConnectInput(): boolean {
+    return adapterIsConnecting;
+  }
+
+  override onConnectOutput(): boolean {
+    return adapterIsConnecting;
   }
 
   override onDrawForeground(ctx: CanvasRenderingContext2D): void {

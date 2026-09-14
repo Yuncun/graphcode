@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { cachedTruncate } from "../app/canvas/LoopCardNode.ts";
+import { cachedTruncate, LoopCardNode } from "../app/canvas/LoopCardNode.ts";
 
 function fakeCtx(charWidth = 6) {
   let calls = 0;
@@ -55,5 +55,13 @@ describe("cachedTruncate", () => {
     const result = cachedTruncate(undefined, ctx, "hello world", 55);
     expect(result.result.endsWith("…")).toBe(true);
     expect(result.result.length).toBeLessThan("hello world".length);
+  });
+});
+
+describe("LoopCardNode", () => {
+  it("cannot be deleted or cloned, because phase 0 only mirrors the daemon", () => {
+    const card = new LoopCardNode();
+    expect(card.block_delete).toBe(true);
+    expect(card.clonable).toBe(false);
   });
 });
