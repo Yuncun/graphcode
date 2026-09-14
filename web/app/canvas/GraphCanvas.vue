@@ -91,8 +91,9 @@ function viewFor(project: string): Promise<ProjectView> {
   return view;
 }
 
+/** A starting card is no longer the user's to start, so it is not counted; the badge falls the moment Start is pressed. */
 function counts(view: ProjectView): DocumentCounts {
-  return { drafts: view.adapter.drafts().length, wires: view.adapter.draftEdges().length };
+  return { drafts: view.adapter.cards().filter((c) => c.cardMode === "draft").length, wires: view.adapter.draftEdges().length };
 }
 
 /** The document changed by the user's hand: save it, and tell the toolbar what waits for Start. */

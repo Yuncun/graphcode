@@ -36,8 +36,8 @@ let nodeTypeLoads = 0;
 const counts = ref<DocumentCounts>({ drafts: 0, wires: 0 });
 const workflows = ref<WorkflowListing[]>([]);
 const workflowsLoading = ref(false);
-/** Armed while a Start waits for the daemon; an errorOccurred in that window reverts the starting cards. */
-let startTimer: ReturnType<typeof setTimeout> | null = null;
+/** One per project with a Start in flight; an errorOccurred while any is armed reverts that project's starting cards. */
+const startTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
  * DaemonConnection.send throws when the socket is not open, so every command goes through here:
@@ -55,8 +55,9 @@ function send(command: DaemonCommand): boolean {
 connection.onEvent((event) => {
   store.applyEvent(event);
   if (!active.value && store.order.length) active.value = store.order[0]!;
-  // The daemon's error does not name the draft it refused, so every starting card goes back (plan ruling 8).
-  if ("errorOccurred" in event && startTimer && active.value) revertStarting(active.value, event.errorOccurred._0);
+  // The daemon's error names neither the draft it refused nor the project, so every project with a
+  // start in flight takes its starting cards back (plan ruling 8).
+  if ("errorOccurred" in event) for (const project of [...startTimers.keys()]) revertStarting(project, event.errorOccurred._0);
 });
 connection.onStatus((s) => {
   status.value = s;
@@ -124,15 +125,18 @@ function startCards(only?: string[]) {
   for (const e of plan.edges) if (!send(graphCommand(project, { createEdge: { from: e.from, to: e.to, spec: edgeSpec(e.kind, e.condition) } }))) return;
   if (plan.creates.length) {
     adapter.markStarting(plan.creates.map((c) => c.id));
-    if (startTimer) clearTimeout(startTimer);
-    startTimer = setTimeout(() => revertStarting(project, `the daemon did not report the new loop within ${START_TIMEOUT_MS / 1000} s`), START_TIMEOUT_MS);
+    const armed = startTimers.get(project);
+    if (armed) clearTimeout(armed);
+    startTimers.set(project, setTimeout(() => revertStarting(project, `the daemon did not report the new loop within ${START_TIMEOUT_MS / 1000} s`), START_TIMEOUT_MS));
   }
   canvasView.value?.touch(project);
 }
 
-/** Starting cards go back to draft: the daemon said no, or said nothing for too long. */
+/** One project's starting cards go back to draft: the daemon said no, or said nothing for too long. */
 function revertStarting(project: string, why: string) {
-  if (startTimer) { clearTimeout(startTimer); startTimer = null; }
+  const armed = startTimers.get(project);
+  if (armed) clearTimeout(armed);
+  startTimers.delete(project);
   const adapter = adapterFor(project);
   if (!adapter) return;
   const reverted = adapter.revertStarting();
