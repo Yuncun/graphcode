@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { createStore } from "./daemon/store.ts";
 import { DaemonConnection, type ConnectionStatus } from "./daemon/connection.ts";
 import type { DaemonCommand } from "./daemon/protocol.ts";
-import { edgeSpec, graphCommand } from "./daemon/protocol.ts";
+import { edgeSpec, graphCommand, isLocalProjectPath } from "./daemon/protocol.ts";
 import { loadNodeTypes, type NodeTypeEntry } from "./nodes/registry.ts";
 import { planStart } from "./nodes/start.ts";
 import { getWorkflow, listWorkflows, putWorkflow, type WorkflowListing } from "./canvas/workflowClient.ts";
@@ -25,6 +25,7 @@ const store = createStore();
 const canvasView = ref<InstanceType<typeof GraphCanvas> | null>(null);
 const status = ref<ConnectionStatus>("connecting");
 const active = ref<string | null>(null);
+let openingProject: string | null = null;
 const selected = ref<string | null>(null);
 const connection = new DaemonConnection(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
 
@@ -55,7 +56,12 @@ function send(command: DaemonCommand): boolean {
 
 connection.onEvent((event) => {
   store.applyEvent(event);
-  if (!active.value && store.order.length) active.value = store.order[0]!;
+  if ("graphChanged" in event && event.graphChanged._0.project.path === openingProject) {
+    active.value = openingProject;
+    openingProject = null;
+  }
+  if ("errorOccurred" in event) openingProject = null;
+  if (!active.value) active.value = localPaths.value[0] ?? null;
   // The daemon's error names neither the draft it refused nor the project, so every project with a
   // start in flight takes its starting cards back (plan ruling 8).
   if ("errorOccurred" in event) for (const project of [...startTimers.keys()]) revertStarting(project, event.errorOccurred._0);
@@ -69,8 +75,9 @@ connection.onStatus((s) => {
 });
 
 const names = computed(() => Object.fromEntries(store.order.map((p) => [p, store.projects.get(p)?.project.name ?? p])));
+const localPaths = computed(() => store.order.filter(isLocalProjectPath));
 const activeGraph = computed(() => (active.value ? store.projects.get(active.value) ?? null : null));
-/** The active project once the daemon has actually confirmed it: null for the built-ins-only case, and never a path the daemon rejected (openProject sets `active` before that answer arrives). */
+/** Only a daemon-confirmed project may supply local node packs. */
 const confirmedProject = computed(() => activeGraph.value?.project.path ?? null);
 const lastError = computed(() => store.errors[store.errors.length - 1] ?? "");
 const startable = computed(() => counts.value.drafts + counts.value.wires > 0);
@@ -83,11 +90,15 @@ function closeProject(path: string) {
   canvasView.value?.flushSave(path);
   store.projects.delete(path);
   store.order = store.order.filter((p) => p !== path);
-  if (active.value === path) active.value = store.order[0] ?? null;
+  if (active.value === path) active.value = localPaths.value[0] ?? null;
 }
 function openProject(path: string) {
+  if (!isLocalProjectPath(path)) {
+    store.pushError("The web canvas supports local folders only. Open remote projects in the Mac app.");
+    return;
+  }
   if (!send({ openProject: { path } })) return;
-  active.value = path;
+  openingProject = path;
 }
 
 async function reloadNodeTypes() {
@@ -236,7 +247,7 @@ onMounted(() => {
 
 <template>
   <main class="shell">
-    <ProjectTabs :paths="store.order" :names="names" :active="active" @select="active = $event" @close="closeProject" @open="openProject" />
+    <ProjectTabs :paths="localPaths" :names="names" :active="active" @select="active = $event" @close="closeProject" @open="openProject" />
     <div class="body">
       <Sidebar>
         <template #nodes><NodesPanel :entries="nodeTypes" :loading="nodeTypesLoading" @reload="reloadNodeTypes" /></template>

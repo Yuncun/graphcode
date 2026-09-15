@@ -11,6 +11,18 @@ A browser UI for the GraphCode daemon, on ComfyUI's canvas library. Spec: `../CA
 The bridge talks to the daemon at `GRAPHCODE_SOCKET`, else `$GRAPHCODE_SUPPORT_DIR/graphcoded.sock`,
 else `~/.graphcode/graphcoded.sock`. To drive the fork's daemon: `GRAPHCODE_SUPPORT_DIR=~/.graphcode-fork pnpm serve`.
 
+With Node 26 and pnpm 11 already on PATH, mise is optional: run `pnpm install --frozen-lockfile`,
+`pnpm build`, and `pnpm serve` from `web/`.
+
+If a package mirror lacks versions in the lockfile, a local prototype can use
+`pnpm install --lockfile=false`, then `pnpm --config.lockfile=false build` and
+`node server/main.ts`. This resolves compatible versions without changing the committed lockfile;
+it is not a reproducible locked install. Do not commit mirror-specific download URLs.
+
+The web canvas opens local folders only. Remote projects restored by the daemon stay open in the
+Mac app but are not canvas tabs; their Recent projects entries are disabled. A rejected folder
+open leaves the current canvas in place.
+
 ## Access
 
 The bridge binds to 127.0.0.1 only, so nothing off this machine can reach it. A WebSocket is
