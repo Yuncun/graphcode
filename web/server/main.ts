@@ -6,25 +6,48 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { attachRelay } from "./relay.ts";
 import { readCanvas, writeCanvas } from "./canvasFile.ts";
+import { defaultNodeTypeRoots, listNodeTypes, NODE_TYPE_SOURCES, nodeTypeFile, type NodeTypeRoots, type NodeTypeSource } from "./nodeTypes.ts";
 import { resolveSocketPath } from "./socketPath.ts";
 import { serveStatic } from "./static.ts";
+import { defaultWorkflowsDir, listWorkflows, readWorkflow, writeWorkflow } from "./workflowFiles.ts";
+import { WORKFLOW_NAME } from "../shared/workflowName.ts";
 
-export interface BridgeOptions { port: number; socketPath: string; distDir: string | null }
+export interface BridgeOptions {
+  port: number;
+  socketPath: string;
+  distDir: string | null;
+  /** Default: the repo's `web/nodes` and `~/.graphcode/nodes`. */
+  nodeTypeRoots?: NodeTypeRoots;
+  /** Default: `~/.graphcode/workflows`. */
+  workflowsDir?: string;
+}
 
 /** Where `pnpm dev` serves the app from; it proxies /ws and /api through to the bridge. */
 const VITE_DEV_ORIGIN = "http://localhost:5173";
+
+/** The built-in pack ships in the repo next to `server/`. */
+const BUILTIN_NODES_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "nodes");
+
+/**
+ * Closes DNS rebinding, where a name the attacker owns resolves to 127.0.0.1 and so reaches the
+ * bridge carrying whatever Host and Origin the attacker's page likes. Requiring Host to name this
+ * bridge's own port defeats that regardless of Origin, since the browser sets Host from the URL
+ * actually being requested, which the attacker's page cannot override.
+ */
+export function acceptsHost(req: http.IncomingMessage, port: number): boolean {
+  const host = req.headers.host;
+  return host === `localhost:${port}` || host === `127.0.0.1:${port}`;
+}
 
 /**
  * WebSockets are exempt from the browser's same-origin policy, so without this check any page
  * the developer happens to have open could open ws://localhost:4747/ws and send the daemon
  * whatever it liked. Accept a handshake that carries no Origin at all (a non-browser client,
- * such as a test), and otherwise only the bridge's own page or the Vite dev server. Checking
- * Host as well closes DNS rebinding, where a name the attacker owns resolves to 127.0.0.1 and
- * so reaches the bridge with an Origin of its own.
+ * such as a test), and otherwise only the bridge's own page or the Vite dev server. `acceptsHost`
+ * covers the Host half; the `/api/*` routes below share that same check.
  */
 export function acceptsHandshake(req: http.IncomingMessage, port: number): boolean {
-  const host = req.headers.host;
-  if (host !== `localhost:${port}` && host !== `127.0.0.1:${port}`) return false;
+  if (!acceptsHost(req, port)) return false;
   const origin = req.headers.origin;
   return origin === undefined
     || origin === `http://localhost:${port}`
@@ -41,33 +64,103 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   });
 }
 
-function projectFromQuery(req: http.IncomingMessage): string | null {
+async function projectFromQuery(req: http.IncomingMessage): Promise<string | null> {
   const project = new URL(req.url ?? "/", "http://localhost").searchParams.get("project") ?? "";
   if (!path.isAbsolute(project)) return null;
-  try { return fs.statSync(project).isDirectory() ? project : null; } catch { return null; }
+  try { return (await fs.promises.stat(project)).isDirectory() ? project : null; } catch { return null; }
 }
 
 export async function startBridge(options: BridgeOptions): Promise<{ port: number; close(): Promise<void> }> {
   const serveApp = options.distDir ? serveStatic(options.distDir) : null;
+  const nodeTypeRoots = options.nodeTypeRoots ?? defaultNodeTypeRoots(BUILTIN_NODES_DIR);
+  const workflowsDir = options.workflowsDir ?? defaultWorkflowsDir();
+  const json = (res: http.ServerResponse, status: number, body: unknown) => {
+    res.writeHead(status, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
+  };
   const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", "http://localhost");
-    if (url.pathname === "/api/canvas") {
-      const project = projectFromQuery(req);
-      if (!project) { res.writeHead(400, { "content-type": "application/json" }); res.end('{"error":"project must be an absolute path to an existing directory"}'); return; }
-      if (req.method === "GET") {
-        res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(await readCanvas(project))); return;
+    try {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      // The WebSocket handshake names DNS rebinding as the reason it checks Host; the HTTP API
+      // routes read and write files on this machine on the strength of the same origin, so they
+      // get the same Host half of that check (Origin/CORS already covers a browser fetch; this
+      // closes the gap a rebound page would otherwise walk through).
+      if (url.pathname.startsWith("/api/") && !acceptsHost(req, boundPort)) { res.writeHead(403); res.end(); return; }
+      if (url.pathname === "/api/canvas") {
+        const project = await projectFromQuery(req);
+        if (!project) { res.writeHead(400, { "content-type": "application/json" }); res.end('{"error":"project must be an absolute path to an existing directory"}'); return; }
+        if (req.method === "GET") {
+          res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(await readCanvas(project))); return;
+        }
+        if (req.method === "PUT") {
+          // A fixed message: the thrown error names the file it could not write, and that is a
+          // path on this machine that the caller has no business being told.
+          try { await writeCanvas(project, JSON.parse(await readBody(req))); res.writeHead(204); res.end(); }
+          catch { res.writeHead(400, { "content-type": "application/json" }); res.end('{"error":"the canvas document could not be stored"}'); }
+          return;
+        }
+        res.writeHead(405); res.end(); return;
       }
-      if (req.method === "PUT") {
-        // A fixed message: the thrown error names the file it could not write, and that is a
-        // path on this machine that the caller has no business being told.
-        try { await writeCanvas(project, JSON.parse(await readBody(req))); res.writeHead(204); res.end(); }
-        catch { res.writeHead(400, { "content-type": "application/json" }); res.end('{"error":"the canvas document could not be stored"}'); }
+      if (url.pathname === "/api/nodes") {
+        if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
+        // `project` is optional here: with none, only the built-in and user packs are listed.
+        const project = await projectFromQuery(req);
+        if (url.searchParams.has("project") && !project) { json(res, 400, { error: "project must be an absolute path to an existing directory" }); return; }
+        const types = await listNodeTypes(nodeTypeRoots, project);
+        const projectQuery = project ? `&project=${encodeURIComponent(project)}` : "";
+        json(res, 200, { types: types.map((t) => ({ ...t, url: `/api/nodes/file?source=${t.source}&type=${encodeURIComponent(t.type)}${projectQuery}` })) });
         return;
       }
-      res.writeHead(405); res.end(); return;
+      if (url.pathname === "/api/nodes/file") {
+        if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
+        const source = url.searchParams.get("source") as NodeTypeSource | null;
+        const type = url.searchParams.get("type") ?? "";
+        const project = await projectFromQuery(req);
+        if (!source || !NODE_TYPE_SOURCES.includes(source) || (source === "project" && !project)) { json(res, 400, { error: "source must be builtin, user, or project (with a project path)" }); return; }
+        const file = await nodeTypeFile(nodeTypeRoots, project, source, type);
+        if (!file) { res.writeHead(404); res.end(); return; }
+        // Read before writing the header: `nodeTypeFile` only just stat'd the file, and it could
+        // be removed between that stat and this read (TOCTOU) — treat a failed read the same as
+        // a missing file rather than sending a 200 header we then can't back up with a body.
+        let body: Buffer;
+        try { body = await fs.promises.readFile(file); }
+        catch { res.writeHead(404); res.end(); return; }
+        // no-store: the browser imports each module through a fresh URL anyway, and an edited pack must never be served stale.
+        res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+        res.end(body);
+        return;
+      }
+      if (url.pathname === "/api/workflows") {
+        if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
+        json(res, 200, { workflows: await listWorkflows(workflowsDir) });
+        return;
+      }
+      if (url.pathname === "/api/workflows/file") {
+        const name = url.searchParams.get("name") ?? "";
+        if (!WORKFLOW_NAME.test(name)) { json(res, 400, { error: "name must be 1 to 64 letters, digits, spaces, _ - or ., not starting with a space or a dot" }); return; }
+        if (req.method === "GET") {
+          const file = await readWorkflow(workflowsDir, name);
+          if (file === null) { res.writeHead(404); res.end(); return; }
+          json(res, 200, file);
+          return;
+        }
+        if (req.method === "PUT") {
+          // A fixed message: the thrown error could name a path on this machine.
+          try { await writeWorkflow(workflowsDir, name, JSON.parse(await readBody(req))); res.writeHead(204); res.end(); }
+          catch { json(res, 400, { error: "the workflow could not be stored" }); }
+          return;
+        }
+        res.writeHead(405); res.end(); return;
+      }
+      if (serveApp) { serveApp(req, res); return; }
+      res.writeHead(404); res.end();
+    } catch (error) {
+      console.error("graphcode-web:", error);
+      // Headers may already be on the wire (the /api/nodes/file body streamed, say); in that
+      // case the response can only be ended, not restarted with a fresh status.
+      if (!res.headersSent) { res.writeHead(500, { "content-type": "application/json" }); res.end('{"error":"the bridge could not handle the request"}'); }
+      else res.end();
     }
-    if (serveApp) { serveApp(req, res); return; }
-    res.writeHead(404); res.end();
   });
   // The bound port is only known once `listen` has answered (callers pass 0 to take any free
   // port), and the handshake check needs it, so it is read at handshake time rather than here.

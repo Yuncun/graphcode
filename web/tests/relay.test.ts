@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -6,6 +7,18 @@ import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { startBridge } from "../server/main.ts";
 import { startFakeDaemon, waitFor, type FakeDaemon } from "./fakeDaemon.ts";
+
+/** A raw request with a Host header `fetch` will not let a test set, to check the bridge's Host guard. */
+function getWithHost(port: number, reqPath: string, host: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: "127.0.0.1", port, path: reqPath, headers: { host } }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode!));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
 
 let daemon: FakeDaemon;
 let bridge: Awaited<ReturnType<typeof startBridge>>;
@@ -53,13 +66,21 @@ describe("bridge relay", () => {
     bridge = await startBridge({ port: 0, socketPath: daemon.path, distDir: null });
     const project = fs.mkdtempSync(path.join(os.tmpdir(), "gcw-proj-"));
     const url = `http://localhost:${bridge.port}/api/canvas?project=${encodeURIComponent(project)}`;
-    expect(await (await fetch(url)).json()).toEqual({ version: 1, nodes: {} });
+    expect(await (await fetch(url)).json()).toEqual({ version: 2, nodes: {}, drafts: {}, draftEdges: [] });
     const doc = { version: 1, nodes: { "N-1": { pos: [1, 2] } } };
     const put = await fetch(url, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(doc) });
     expect(put.status).toBe(204);
     expect(await (await fetch(url)).json()).toEqual(doc);
     const bad = await fetch(`http://localhost:${bridge.port}/api/canvas?project=relative/path`);
     expect(bad.status).toBe(400);
+  });
+
+  it("refuses an /api/canvas request whose Host names another host, DNS rebinding's target", async () => {
+    daemon = await startFakeDaemon();
+    bridge = await startBridge({ port: 0, socketPath: daemon.path, distDir: null });
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), "gcw-proj-"));
+    expect(await getWithHost(bridge.port, `/api/canvas?project=${encodeURIComponent(project)}`, "evil.example:80")).toBe(403);
+    expect((await fetch(`http://localhost:${bridge.port}/api/canvas?project=${encodeURIComponent(project)}`)).status).toBe(200);
   });
 
   it("refuses a WebSocket from a page on another origin, and one addressed to another host", async () => {

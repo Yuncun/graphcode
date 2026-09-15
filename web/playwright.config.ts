@@ -3,7 +3,7 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "e2e",
   timeout: 60_000,
-  use: { viewport: { width: 1400, height: 900 } },
+  use: { viewport: { width: 1600, height: 1000 } },
   webServer: {
     command: "pnpm build && GRAPHCODE_WEB_PORT=4790 node server/main.ts",
     url: "http://localhost:4790",
