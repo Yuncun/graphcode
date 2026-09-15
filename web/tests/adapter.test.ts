@@ -18,7 +18,7 @@ beforeAll(async () => {
   })));
 });
 
-const host = (): CardHost => ({ onChanged: vi.fn(), onAction: vi.fn(), onEditField: vi.fn(), onRename: vi.fn() });
+const host = (): CardHost => ({ onChanged: vi.fn(), onEditField: vi.fn(), onRename: vi.fn() });
 let minted = 0;
 const newID = () => `NEW-${++minted}`;
 function make(): GraphAdapter {

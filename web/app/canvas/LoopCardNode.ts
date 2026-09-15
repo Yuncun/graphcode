@@ -8,7 +8,6 @@ import { defaultValues, missingRequired, type WidgetDef, type WidgetValues } fro
 import type { CardRecord, Placed } from "./document.ts";
 import { ageLabel } from "./time.ts";
 import { liveLine } from "./liveLine.ts";
-import { ButtonRowWidget } from "./widgets/ButtonRowWidget.ts";
 import { FieldWidget } from "./widgets/FieldWidget.ts";
 import { StatusWidget } from "./widgets/StatusWidget.ts";
 
@@ -17,13 +16,11 @@ export const CARD_WIDTH = 300;
 export const TITLE_FIELD = "__title";
 
 export type CardMode = "draft" | "starting" | "live";
-export type CardAction = "start" | "stop" | "restart";
 
 /** What a card asks of the canvas around it. */
 export interface CardHost {
   /** A value, title or size changed: the layout wants saving. */
   onChanged(card: LoopCardNode): void;
-  onAction(card: LoopCardNode, action: CardAction): void;
   onEditField(card: LoopCardNode, widget: FieldWidget): void;
   /** A live card's title field was committed with a new title. */
   onRename(card: LoopCardNode, title: string): void;
@@ -61,13 +58,6 @@ const stateWord: Record<LoopStateName, string> = {
   idle: "IDLE", running: "RUNNING", awaitingInput: "NEEDS YOU", blocked: "BLOCKED", succeeded: "DONE",
   failed: "FAILED", stalled: "STALLED", waiting: "WAITING", stopped: "STOPPED",
 };
-const STOPPABLE: readonly LoopStateName[] = ["running", "awaitingInput", "blocked", "stalled", "waiting"];
-
-/** `stopNode` resolves an unresolved loop; a loop that is idle, done, failed or already stopped has nothing to stop. */
-export function canStop(node: LoopNode): boolean {
-  return STOPPABLE.includes(stateName(node));
-}
-
 /**
  * litegraph asks both nodes before it makes any connection, and it uses that one path for a user
  * dragging one slot onto another as well as for the adapter drawing a link. Every link on the graph,
@@ -93,8 +83,9 @@ export function onUserLinkDrop(handler: ((drop: UserLinkDrop) => void) | null): 
 /**
  * One card: a draft the user is composing, a draft the daemon has been asked for (starting), or a
  * loop the daemon reports (live). Its widgets come from its node type: a title field, one widget per
- * `widgets` entry (text fields drawn here, combo/number/toggle from litegraph), a button row, and the
- * status block. litegraph lays them out under the slot rows and grows the card to fit; a multiline
+ * `widgets` entry (text fields drawn here, combo/number/toggle from litegraph), and the status block.
+ * No buttons: as in ComfyUI, the toolbar's one Run sends every draft, and Stop and Restart stay in
+ * the Swift app and the CLI. litegraph lays them out under the slot rows and grows the card to fit; a multiline
  * field takes the room a resize gives.
  */
 export class LoopCardNode extends LGraphNode {
@@ -113,7 +104,6 @@ export class LoopCardNode extends LGraphNode {
   private readonly titleField = new FieldWidget(TITLE_FIELD, "Title", "", { placeholder: "Optional; a loop names itself once it starts" });
   private readonly fields = new Map<string, FieldWidget>();
   private readonly builtins = new Map<string, ValueWidget>();
-  private readonly actions = new ButtonRowWidget();
   private readonly status = new StatusWidget();
 
   constructor() {
@@ -134,7 +124,7 @@ export class LoopCardNode extends LGraphNode {
     }
   }
 
-  /** Builds the card for a node type: title field, the type's widgets in order, buttons, status. */
+  /** Builds the card for a node type: title field, the type's widgets in order, status. */
   setup(def: NodeTypeDef, record: CardRecord): void {
     this.def = def;
     this.nodeType = record.type;
@@ -149,7 +139,6 @@ export class LoopCardNode extends LGraphNode {
       this.titleField.value = this.title;
       this.addCustomWidget(this.titleField as unknown as IWidget);
       for (const w of def.widgets) this.addWidgetFor(w);
-      this.addCustomWidget(this.actions as unknown as IWidget);
       this.addCustomWidget(this.status as unknown as IWidget);
     } finally {
       this.sizing = false;
@@ -245,7 +234,7 @@ export class LoopCardNode extends LGraphNode {
     this.refresh();
   }
 
-  /** A live loop with no loaded type: title, buttons and status only. */
+  /** A live loop with no loaded type: title and status only. */
   private setupBare(title: string): void {
     this.def = null;
     this.nodeType = "";
@@ -258,7 +247,6 @@ export class LoopCardNode extends LGraphNode {
       this.builtins.clear();
       this.titleField.value = title;
       this.addCustomWidget(this.titleField as unknown as IWidget);
-      this.addCustomWidget(this.actions as unknown as IWidget);
       this.addCustomWidget(this.status as unknown as IWidget);
     } finally {
       this.sizing = false;
@@ -302,7 +290,7 @@ export class LoopCardNode extends LGraphNode {
     this.refresh();
   }
 
-  /** Everything that follows from mode, values and loop: colour, badge, read-only state, buttons, status lines. */
+  /** Everything that follows from mode, values and loop: colour, badge, read-only state, status lines. */
   refresh(): void {
     this.color = typeColor[this.loopTypeGuess()] ?? typeColor.sketch;
     const live = this.cardMode === "live";
@@ -312,25 +300,19 @@ export class LoopCardNode extends LGraphNode {
     if (live && this.loop) {
       const state = stateName(this.loop);
       this.badges = [new LGraphBadge({ text: stateWord[state] ?? state, bgColor: stateColor[state] ?? "#6b7079", fgColor: "#ffffff" })];
-      this.actions.buttons = [
-        { label: "Stop", enabled: canStop(this.loop), onClick: () => this.host?.onAction(this, "stop") },
-        { label: "Restart", enabled: true, onClick: () => this.host?.onAction(this, "restart") },
-      ];
       this.status.warning = "";
       this.status.live = liveLine(this.loop);
       this.status.meta = `${LOOP_TYPE_LABEL[this.loop.loopType] ?? this.loop.loopType} · ${ageLabel(this.loop.createdAt)}${this.loop.modelTier ? " · " + this.loop.modelTier : ""}`;
     } else {
       this.badges = [new LGraphBadge({ text: starting ? "STARTING" : "DRAFT", bgColor: starting ? "#3b82f6" : "#6b7079", fgColor: "#ffffff" })];
-      const problems = this.problems();
-      this.actions.buttons = [{ label: starting ? "Starting…" : "Start", enabled: !starting && problems.length === 0, onClick: () => this.host?.onAction(this, "start") }];
-      this.status.warning = problems[0] ?? "";
+      this.status.warning = this.problems()[0] ?? "";
       this.status.live = "";
       this.status.meta = `${this.def?.title ?? this.nodeType} · not started`;
     }
     this.setDirtyCanvas(true, true);
   }
 
-  /** What the daemon would refuse, worded for the status line; empty when Start may be pressed. */
+  /** What the daemon would refuse, worded for the status line; empty when Run may send this draft. */
   problems(): string[] {
     if (!this.def) return ["This card has no node type."];
     // A blank required field is one problem, not two: the daemon's own rule for it is not asked until it is filled.

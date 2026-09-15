@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { ButtonRowWidget, BUTTON_ROW_HEIGHT } from "../app/canvas/widgets/ButtonRowWidget.ts";
 import { FieldWidget, FIELD_MARGIN, LABEL_HEIGHT, MULTILINE_MIN_HEIGHT, SINGLE_LINE_HEIGHT } from "../app/canvas/widgets/FieldWidget.ts";
 import { StatusWidget, STATUS_HEIGHT } from "../app/canvas/widgets/StatusWidget.ts";
 
@@ -62,41 +61,6 @@ describe("FieldWidget", () => {
   });
 });
 
-describe("ButtonRowWidget", () => {
-  it("lays its buttons out left to right with a gap, all the same width", () => {
-    const w = new ButtonRowWidget();
-    w.buttons = [{ label: "Stop", enabled: true, onClick() {} }, { label: "Restart", enabled: true, onClick() {} }];
-    w.last_y = 100;
-    const [a, b] = w.boxes(node(300));
-    expect(a).toEqual([FIELD_MARGIN, 100, (300 - FIELD_MARGIN * 2 - 6) / 2, BUTTON_ROW_HEIGHT - 4]);
-    expect(b![0]).toBeCloseTo(a![0] + a![2] + 6, 5);
-    expect(w.computeLayoutSize()).toEqual({ minHeight: BUTTON_ROW_HEIGHT, maxHeight: BUTTON_ROW_HEIGHT, minWidth: 0 });
-  });
-
-  it("runs the button under a pointer down, skipping disabled ones and pointer up", () => {
-    const stop = vi.fn();
-    const restart = vi.fn();
-    const w = new ButtonRowWidget();
-    w.buttons = [{ label: "Stop", enabled: false, onClick: stop }, { label: "Restart", enabled: true, onClick: restart }];
-    w.last_y = 100;
-    const [a, b] = w.boxes(node(300));
-    expect(w.mouse({ type: "pointerdown" }, [a![0] + 2, 105], node())).toBe(true);
-    expect(stop).not.toHaveBeenCalled();
-    expect(w.mouse({ type: "pointerdown" }, [b![0] + 2, 105], node())).toBe(true);
-    expect(restart).toHaveBeenCalledTimes(1);
-    expect(w.mouse({ type: "pointerup" }, [b![0] + 2, 105], node())).toBe(false);
-    expect(w.mouse({ type: "pointerdown" }, [b![0] + 2, 200], node())).toBe(true);
-    expect(restart).toHaveBeenCalledTimes(1);
-  });
-
-  it("draws every label", () => {
-    const w = new ButtonRowWidget();
-    w.buttons = [{ label: "Start", enabled: true, onClick() {} }];
-    const { ctx, text } = fakeCtx();
-    w.draw(ctx, node(), 300, 100, 20, false);
-    expect(text).toEqual(["Start"]);
-  });
-});
 
 describe("StatusWidget", () => {
   it("is a fixed two-line block that shows the warning in place of the live line", () => {

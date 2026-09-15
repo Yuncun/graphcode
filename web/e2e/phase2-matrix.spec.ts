@@ -46,11 +46,6 @@ async function widgetPoint(page: Page, project: string, id: string, name: string
   if (!box) throw new Error(`no widget ${name} on ${id}`);
   return cardPoint(page, project, id, [box[0] + box[2] / 2, box[1] + box[3] / 2]);
 }
-async function buttonPoint(page: Page, project: string, id: string, label: string): Promise<{ x: number; y: number }> {
-  const box = await page.evaluate(([p, i, l]) => window.__graphcode.buttonBox(p, i, l), [project, id, label] as const);
-  if (!box) throw new Error(`no button ${label} on ${id}`);
-  return cardPoint(page, project, id, [box[0] + box[2] / 2, box[1] + box[3] / 2]);
-}
 
 async function dragLink(page: Page, project: string, fromID: string, slot: number, toID: string): Promise<void> {
   const from = await cardPoint(page, project, fromID, [OUTPUT_SLOT_X, slotY(slot)]);
@@ -284,7 +279,7 @@ test.describe("phase 2 surface", () => {
     { row: "P2-05e", slot: 4, kind: "spawn", condition: "always", slug: "wire-spawn" },
   ];
   for (const s of slots) {
-    test(`${s.row} a wire from the "${s.kind} ${s.condition}" output is a draft until Start, then that edge`, async ({ page }) => {
+    test(`${s.row} a wire from the "${s.kind} ${s.condition}" output is a draft until Run, then that edge`, async ({ page }) => {
       h = await launch();
       await openBeta(page, h);
       const id = await dropType(page, "agent/goal", await emptyPoint(page));
@@ -294,8 +289,7 @@ test.describe("phase 2 surface", () => {
       await page.waitForTimeout(200);
       expect(receivedGraphCommands(h, "createEdge")).toEqual([]);
       await shot(page, `${s.row}-${s.slug}-draft`);
-      const start = await buttonPoint(page, h.beta, id, "Start");
-      await page.mouse.click(start.x, start.y);
+      await page.getByTestId("run").click();
       await expect.poll(() => receivedGraphCommands(h, "createEdge").length).toBe(1);
       expect(receivedGraphCommands(h, "createNode")[0]!.createNode._0).toMatchObject({ id, loopType: "goalBased", goal: { summary: "Ship it" } });
       expect(receivedGraphCommands(h, "createEdge")[0]!.createEdge).toEqual({ from: id, to: ID.betaOne, spec: { kind: s.kind, condition: s.condition, payloadTransform: { none: {} } } });
@@ -308,25 +302,21 @@ test.describe("phase 2 surface", () => {
     });
   }
 
-  test("P2-06 a draft with a problem cannot start: the card says why, and Start all names it and sends nothing", async ({ page }) => {
+  test("P2-06 a draft with a problem cannot run: the card says why, and Run names it and sends nothing", async ({ page }) => {
     h = await launch();
     await openAlpha(page, h);
     const id = await dropType(page, "agent/goal", await emptyPoint(page));
     await shot(page, "P2-06-problem-on-card");
-    const start = await buttonPoint(page, h.alpha, id, "Start");
-    await page.mouse.click(start.x, start.y);
-    await page.waitForTimeout(200);
-    expect(receivedGraphCommands(h, "createNode")).toEqual([]);
-    expect((await cardByID(page, h.alpha, id))!.mode).toBe("draft");
-    await expect(page.getByTestId("start-all")).toBeEnabled();
-    await page.getByTestId("start-all").click();
+    await expect(page.getByTestId("run")).toBeEnabled();
+    await page.getByTestId("run").click();
     await expect(page.getByTestId("status")).toContainText("Goal is required.");
     await page.waitForTimeout(200);
     expect(receivedGraphCommands(h, "createNode")).toEqual([]);
+    expect((await cardByID(page, h.alpha, id))!.mode).toBe("draft");
     expect(h.pageErrors).toEqual([]);
   });
 
-  test("P2-07 Start all sends every draft, then the wire between them, and both cards come back live", async ({ page }) => {
+  test("P2-07 Run sends every draft, then the wire between them, and both cards come back live", async ({ page }) => {
     h = await launch();
     await openBeta(page, h);
     const a = await dropType(page, "agent/goal", await emptyPoint(page));
@@ -335,9 +325,9 @@ test.describe("phase 2 surface", () => {
     const b = await dropType(page, "agent/main", await emptyPoint2(page));
     await dragLink(page, h.beta, a, 1, b);
     await expect.poll(() => g(page)).toEqual({ drafts: 2, wires: 1 });
-    await expect(page.getByTestId("start-count")).toHaveText("3");
+    await expect(page.getByTestId("run-count")).toHaveText("3");
     await shot(page, "P2-07a-two-drafts-wired");
-    await page.getByTestId("start-all").click();
+    await page.getByTestId("run").click();
     await expect.poll(() => receivedGraphCommands(h, "createEdge").length).toBe(1);
     const commands = receivedCommands(h, "graphCommand").map((c) => Object.keys(c.graphCommand.command)[0]);
     expect(commands).toEqual(["createNode", "createNode", "createEdge"]);
@@ -347,7 +337,7 @@ test.describe("phase 2 surface", () => {
     await expect.poll(async () => (await cards(page, h.beta)).filter((c) => c.mode === "live").length).toBe(4);
     await expect.poll(() => edgeCount(page, h.beta)).toBe(2);
     await expect.poll(() => g(page)).toEqual({ drafts: 0, wires: 0 });
-    await expect(page.getByTestId("start-all")).toBeDisabled();
+    await expect(page.getByTestId("run")).toBeDisabled();
     await shot(page, "P2-07b-started");
     expect(h.pageErrors).toEqual([]);
   });
@@ -357,8 +347,7 @@ test.describe("phase 2 surface", () => {
     await openAlpha(page, h);
     const id = await dropType(page, "agent/main", await emptyPoint(page));
     await fillField(page, h.alpha, id, TITLE_FIELD, REJECTED_TITLE, false);
-    const start = await buttonPoint(page, h.alpha, id, "Start");
-    await page.mouse.click(start.x, start.y);
+    await page.getByTestId("run").click();
     await expect.poll(() => receivedGraphCommands(h, "createNode").length).toBe(1);
     await expect(page.getByTestId("status")).toContainText("draft rejected");
     await expect.poll(async () => (await cardByID(page, h.alpha, id))?.mode).toBe("draft");
@@ -429,30 +418,6 @@ test.describe("phase 2 surface", () => {
     expect(receivedGraphCommands(h, "deleteEdge")[0]!.deleteEdge._0).toBe(EDGE.betaOneToTwo);
     await expect.poll(() => edgeCount(page, h.beta)).toBe(0);
     await shot(page, "P2-10b-live-edge-deleted");
-    expect(h.pageErrors).toEqual([]);
-  });
-
-  test("P2-11 Stop and Restart are buttons on a live card, and Stop is off where it does not apply", async ({ page }) => {
-    h = await launch();
-    await openAlpha(page, h);
-    const stop = await buttonPoint(page, h.alpha, ID.build, "Stop");
-    await page.mouse.click(stop.x, stop.y);
-    await expect.poll(() => receivedGraphCommands(h, "stopNode").length).toBe(1);
-    expect(receivedGraphCommands(h, "stopNode")[0]!.stopNode._0).toBe(ID.build);
-    await expect.poll(async () => Object.keys((await graphOf(page, h.alpha)).nodes.find((n) => n.id === ID.build)!.state)[0]).toBe("stopped");
-    await shot(page, "P2-11a-stopped");
-    await page.mouse.click(stop.x, stop.y);
-    await page.waitForTimeout(200);
-    expect(receivedGraphCommands(h, "stopNode")).toHaveLength(1);
-    const restart = await buttonPoint(page, h.alpha, ID.build, "Restart");
-    await page.mouse.click(restart.x, restart.y);
-    await expect.poll(() => receivedGraphCommands(h, "restartNode").length).toBe(1);
-    await expect.poll(async () => Object.keys((await graphOf(page, h.alpha)).nodes.find((n) => n.id === ID.build)!.state)[0]).toBe("running");
-    const idleStop = await buttonPoint(page, h.alpha, ID.plan, "Stop");
-    await page.mouse.click(idleStop.x, idleStop.y);
-    await page.waitForTimeout(200);
-    expect(receivedGraphCommands(h, "stopNode")).toHaveLength(1);
-    await shot(page, "P2-11b-restarted");
     expect(h.pageErrors).toEqual([]);
   });
 
@@ -587,14 +552,13 @@ test.describe("phase 2 surface", () => {
     expect(h.pageErrors).toEqual([]);
   });
 
-  test("P2-19 a Start on a project that is then left for another tab is not reverted by the backstop", async ({ page }) => {
+  test("P2-19 a Run on a project that is then left for another tab is not reverted by the backstop", async ({ page }) => {
     h = await launch();
     await openBeta(page, h);
     const id = await dropType(page, "agent/goal", await emptyPoint(page));
     await fillField(page, h.beta, id, "summary", "Ship it");
     await page.evaluate(() => window.__graphcode.setStartTimeout(800));
-    const start = await buttonPoint(page, h.beta, id, "Start");
-    await page.mouse.click(start.x, start.y);
+    await page.getByTestId("run").click();
     await page.getByTestId("tab-name").nth(0).click();
     await expect.poll(() => page.evaluate(() => window.__graphcode.active())).toBe(h.alpha);
     await page.waitForTimeout(1500);
@@ -611,8 +575,7 @@ test.describe("phase 2 surface", () => {
     await openBeta(page, h);
     const id = await dropType(page, "agent/goal", await emptyPoint(page));
     await fillField(page, h.beta, id, "summary", "Ship it");
-    const start = await buttonPoint(page, h.beta, id, "Start");
-    await page.mouse.click(start.x, start.y);
+    await page.getByTestId("run").click();
     await expect.poll(async () => (await cardByID(page, h.beta, id))?.mode).toBe("live");
     await page.reload();
     await openBeta(page, h);

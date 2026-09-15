@@ -179,7 +179,7 @@ is a later phase.
 | Nodes tab | Tree of node types by category with search. Drag onto the canvas creates a node with default widget values; the inspector opens for the brief. Create is sent to the daemon only when the brief is confirmed, because a goal loop starts on creation (finding 19). Version 1 pack: agent/goal, agent/timed, agent/main, agent/turn, group/composite; project pack over user pack over built-in on the same name. Phase 2: the drop makes a draft card with its inputs on it (section 11). |
 | Workflows tab | Recent projects, open by path, and saved graphs (exported bundles). Phase 2: saved workflow files (section 11); recent projects move to a Projects tab. |
 | Templates tab | The kit's template files. Dragging one onto the canvas creates a node with the template's settings. Composite templates come in phase 2 through `importNodes`. |
-| Inspector | Brief of the selected node, read-only in phase 1, with Rename; its edges with kind, condition and a delete each; actions Stop, Restart, Detach from template, Delete. Removed in phase 2: the card carries its inputs and buttons (section 11). |
+| Inspector | Brief of the selected node, read-only in phase 1, with Rename; its edges with kind, condition and a delete each; actions Stop, Restart, Detach from template, Delete. Removed in phase 2: the card carries its inputs (section 11). |
 | Bottom panel | Terminal per opened node (xterm.js attached to the zmx session), plus the project's Mailroom. |
 | Attention | A count of loops needing a human in the tab strip, and an orange glow on the card, as today. |
 
@@ -238,14 +238,16 @@ conflates authoring with running.
 - **Drafts.** Dropping a node type makes a draft card at once; nothing is sent. Draft wires are drawn
   from any card's output onto any card and kept locally. Drafts and draft wires live in canvas.json
   (version 2) so a reload keeps them.
-- **Start.** A Start button on a draft card sends its `createNode`, then `createEdge` for each draft
-  wire whose ends are live or just sent. A toolbar Start sends every draft in one go. A card is
+- **Run.** One Run in the toolbar sends `createNode` for every draft, then `createEdge` for each draft
+  wire whose ends are live or just sent. There is no Start on a card, as ComfyUI has no Run on a node;
+  a draft that would be refused is named and blocks the Run (revised 2026-09-14). A card is
   "starting" until the daemon echoes its id, then it is live; an `errorOccurred` while a start is in
   flight, or 10 s of silence, returns the starting cards to draft with the error in the footer. A goal
-  loop still runs the moment the daemon has it (finding 19); Start is the moment the user chooses.
+  loop still runs the moment the daemon has it (finding 19); Run is the moment the user chooses.
 - **Delete and actions.** The Delete key removes a draft outright and asks before sending `deleteNode`
   for a live card. Dragging a wire off its input removes a draft wire outright and asks before sending
-  `deleteEdge` for a live edge. Stop and Restart are buttons on a live card. The right-hand inspector
+  `deleteEdge` for a live edge. Stop and Restart are not on the canvas; the Swift app and the CLI keep
+  them (revised 2026-09-14). The right-hand inspector
   and Detach from template are gone.
 - **Workflow file.** Save writes every card (live ones through the type's `fromLoop`) and every wire to
   `~/.graphcode/workflows/<name>.json`. The Workflows tab lists those files and loads one onto the

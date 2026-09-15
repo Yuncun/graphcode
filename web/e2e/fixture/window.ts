@@ -26,6 +26,5 @@ export interface GraphcodeWindow {
   document(project: string): { nodes: Record<string, unknown>; drafts: Record<string, unknown>; draftEdges: unknown[] } | undefined;
   counts(): { drafts: number; wires: number };
   widgetBox(project: string, id: string, name: string): Box | null;
-  buttonBox(project: string, id: string, label: string): Box | null;
   setStartTimeout(ms: number): void;
 }

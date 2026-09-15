@@ -10,10 +10,9 @@ import type { CanvasDoc } from "./document.ts";
 import { FieldEditor } from "./FieldEditor.ts";
 import { getLayout, putLayout } from "./layoutClient.ts";
 import { linkRequestFrom, type DraggedLink, type LinkRequest } from "./linkRequest.ts";
-import { LoopCardNode, onUserLinkDrop, outputSlotFor, type CardAction, type CardHost } from "./LoopCardNode.ts";
+import { LoopCardNode, onUserLinkDrop, outputSlotFor, type CardHost } from "./LoopCardNode.ts";
 import { createSaveScheduler } from "./saveScheduler.ts";
 import { applyViewport, fitToNodes, readViewport, type Viewport } from "./viewport.ts";
-import { ButtonRowWidget } from "./widgets/ButtonRowWidget.ts";
 import { FieldWidget } from "./widgets/FieldWidget.ts";
 
 interface ProjectView {
@@ -39,7 +38,6 @@ const VIEW_MARGIN: [number, number] = [24, LiteGraph.NODE_TITLE_HEIGHT + 24];
 const props = defineProps<{ graph: LoopGraph; nodeTypes: NodeTypeEntry[] }>();
 const emit = defineEmits<{
   select: [id: string | null];
-  action: [id: string, action: CardAction];
   rename: [id: string, title: string];
   /** The Delete key on live cards: the daemon's to delete, so App asks first. */
   deleteLive: [ids: string[]];
@@ -70,7 +68,6 @@ let shown: ProjectView | null = null;
 /** What every card asks of the canvas. */
 const host: CardHost = {
   onChanged: () => changed(),
-  onAction: (card, action) => emit("action", String(card.id), action),
   onEditField: (card, widget) => {
     if (canvas && editor) editor.open(canvas, card, widget, (text) => card.setFieldValue(widget, text));
   },
@@ -186,7 +183,7 @@ function fit(): void {
 /**
  * A widget's `last_y` is only assigned inside litegraph's own draw pass, which normally runs on
  * the next animation frame; a card added this instant (a drop, a workflow load) has not had one
- * yet, so `widgetBox`/`buttonBox` would read every widget's stale, undrawn position. Forcing one
+ * yet, so `widgetBox` would read every widget's stale, undrawn position. Forcing one
  * synchronous frame here makes every widget's geometry correct the moment a browser test asks for it.
  */
 function forceLayout(): void {
@@ -325,17 +322,6 @@ defineExpose({
     if (widget instanceof FieldWidget) return widget.boxRect(card);
     const y = widget.last_y ?? widget.y;
     return [15, y, card.size[0] - 30, widget.computedHeight ?? LiteGraph.NODE_WIDGET_HEIGHT];
-  },
-  /** A button's box in node space, by its label. */
-  buttonBox: (project: string, id: string, label: string): [number, number, number, number] | null => {
-    forceLayout();
-    const card = resolved.get(project)?.adapter.card(id);
-    if (!card) return null;
-    let row: ButtonRowWidget | undefined;
-    for (const w of card.widgets ?? []) if (w instanceof ButtonRowWidget) { row = w; break; }
-    if (!row) return null;
-    const index = row.buttons.findIndex((b) => b.label === label);
-    return index === -1 ? null : row.boxes(card)[index] ?? null;
   },
 });
 

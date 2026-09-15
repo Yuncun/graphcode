@@ -65,7 +65,7 @@ prompt is planned.
 
 The canvas is the document, the way ComfyUI's is. Drag a node type from the Nodes tab onto the
 canvas and it becomes a draft card at once, with its inputs on it: a title, the type's fields (goal or
-prompt, done check, model, backend, …), a Start button and a status line. Nothing is sent. Text fields
+prompt, done check, model, backend, …) and a status line. Nothing is sent. Text fields
 open an editor over themselves (⌘Enter or Enter keeps the text, Escape drops it); model, backend,
 interval and toggles are litegraph's own widgets. Cards drag and resize; position, size, drafts and
 draft wires are saved in `<project>/.graphcode/canvas.json` (version 2). A layout saved by phase 1
@@ -73,11 +73,12 @@ draft wires are saved in `<project>/.graphcode/canvas.json` (version 2). A layou
 for cards a third as tall.
 
 Drag from a card's output slot (handoff, on success, on failure, message, spawn) onto another card to
-draw a wire. Every wire is a draft until Start. Start on a card sends its `createNode` and then
-`createEdge` for each wire whose ends are live; **Start all** in the toolbar sends every draft. A card
-is "starting" until the daemon reports it, then live: its fields turn read-only (the title still
-renames), and Stop and Restart are buttons on it. A goal loop runs the moment the daemon has it;
-Start is the moment you choose.
+draw a wire. Every wire is a draft until Run. **Run** in the toolbar sends `createNode` for every draft
+and then `createEdge` for each wire whose ends are live, the way ComfyUI's one Queue runs the whole
+graph; a draft with a problem is named and nothing is sent. A card is "starting" until the daemon
+reports it, then live: its fields turn read-only (the title still renames). There are no buttons on a
+card; Stop and Restart stay in the Swift app and the CLI. A goal loop runs the moment the daemon has
+it; Run is the moment you choose.
 
 The Delete key removes a draft outright and asks before a live card is deleted. Dragging a wire off
 its input removes a draft wire outright and asks before a live edge is deleted. litegraph's context

@@ -6,7 +6,6 @@ import type { DaemonCommand } from "./daemon/protocol.ts";
 import { edgeSpec, graphCommand } from "./daemon/protocol.ts";
 import { loadNodeTypes, type NodeTypeEntry } from "./nodes/registry.ts";
 import { planStart } from "./nodes/start.ts";
-import type { CardAction } from "./canvas/LoopCardNode.ts";
 import { getWorkflow, listWorkflows, putWorkflow, type WorkflowListing } from "./canvas/workflowClient.ts";
 import { WORKFLOW_NAME } from "../shared/workflowName.ts";
 import GraphCanvas, { type DocumentCounts } from "./canvas/GraphCanvas.vue";
@@ -34,7 +33,7 @@ const nodeTypes = ref<NodeTypeEntry[]>([]);
 const nodeTypesLoading = ref(false);
 /** Counts loads so a slow answer for an earlier project cannot overwrite a newer one. */
 let nodeTypeLoads = 0;
-/** What Start all would send: the canvas reports it after every change. */
+/** What Run would send: the canvas reports it after every change. */
 const counts = ref<DocumentCounts>({ drafts: 0, wires: 0 });
 const workflows = ref<WorkflowListing[]>([]);
 const workflowsLoading = ref(false);
@@ -112,15 +111,16 @@ const adapterFor = (project: string | null) => (project ? canvasView.value?.adap
 const problemText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
- * Start: every draft, or the ones named. createNode for each, then createEdge for each wire whose
- * two ends are ready (plan ruling 2). The cards wait as "starting" for the daemon's echo.
+ * Run: every draft, as ComfyUI's one Queue button runs the whole graph. createNode for each, then
+ * createEdge for each wire whose two ends are ready (plan ruling 2). The cards wait as "starting"
+ * for the daemon's echo.
  */
-function startCards(only?: string[]) {
+function startCards() {
   const project = active.value;
   const adapter = adapterFor(project);
   if (!project || !adapter) return;
   const cards = adapter.cards().map((c) => ({ id: String(c.id), mode: c.cardMode, title: c.title, problems: c.cardMode === "draft" ? c.problems() : [], draft: () => c.draft() }));
-  const plan = planStart(cards, adapter.draftEdges(), only);
+  const plan = planStart(cards, adapter.draftEdges());
   for (const s of plan.skipped) store.pushError(`"${s.title || "Untitled"}" was not started: ${s.problem}`);
   if (!plan.creates.length && !plan.edges.length) return;
   for (const c of plan.creates) if (!send(graphCommand(project, { createNode: { _0: c.draft } }))) return;
@@ -151,13 +151,6 @@ function revertStarting(project: string, why: string) {
   canvasView.value?.touch(project);
 }
 
-function onAction(id: string, action: CardAction) {
-  const project = active.value;
-  if (!project) return;
-  if (action === "start") startCards([id]);
-  else if (action === "stop") send(graphCommand(project, { stopNode: { _0: id } }));
-  else send(graphCommand(project, { restartNode: { _0: id } }));
-}
 function onRename(id: string, title: string) {
   if (active.value) send(graphCommand(active.value, { renameNode: { _0: id, title } }));
 }
@@ -234,7 +227,6 @@ onMounted(() => {
     document: (project: string) => canvasView.value?.document(project),
     counts: () => counts.value,
     widgetBox: (project: string, id: string, name: string) => canvasView.value?.widgetBox(project, id, name) ?? null,
-    buttonBox: (project: string, id: string, label: string) => canvasView.value?.buttonBox(project, id, label) ?? null,
     setStartTimeout: (ms: number) => { startTimeoutMs = ms; },
   };
   connection.open();
@@ -253,13 +245,13 @@ onMounted(() => {
       </Sidebar>
       <section class="center">
         <div v-if="activeGraph" class="toolbar" data-testid="toolbar">
-          <button class="primary" data-testid="start-all" :disabled="!startable" :title="`${counts.drafts} draft card(s) and ${counts.wires} draft wire(s)`" @click="startCards()">
-            Start all<span v-if="startable" class="count" data-testid="start-count">{{ counts.drafts + counts.wires }}</span>
+          <button class="primary" data-testid="run" :disabled="!startable" :title="`${counts.drafts} draft card(s) and ${counts.wires} draft wire(s)`" @click="startCards()">
+            Run<span v-if="startable" class="count" data-testid="run-count">{{ counts.drafts + counts.wires }}</span>
           </button>
           <button data-testid="save-workflow" @click="saveWorkflow">Save workflow…</button>
-          <span class="hint">Drop a node type to draft a card. Nothing runs until Start.</span>
+          <span class="hint">Drop a node type to draft a card. Nothing runs until you press Run.</span>
         </div>
-        <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" :node-types="nodeTypes" @select="selected = $event" @action="onAction" @rename="onRename" @delete-live="onDeleteLive" @delete-edge="onDeleteEdge" @document-changed="counts = $event" @problem="store.pushError($event)" />
+        <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" :node-types="nodeTypes" @select="selected = $event" @rename="onRename" @delete-live="onDeleteLive" @delete-edge="onDeleteEdge" @document-changed="counts = $event" @problem="store.pushError($event)" />
         <div v-else class="empty" data-testid="empty">{{ status === "open" ? "No open projects. Press + to open a folder." : "Connecting to graphcoded…" }}</div>
       </section>
     </div>

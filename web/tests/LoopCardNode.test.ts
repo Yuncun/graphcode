@@ -3,7 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { LGraph, LGraphBadge, LiteGraph } from "@comfyorg/litegraph";
-import { canStop, CARD_WIDTH, LoopCardNode, onUserLinkDrop, OUTPUT_SLOTS, outputSlotFor, registerLoopCardNode, TITLE_FIELD, type CardAction, type UserLinkDrop } from "../app/canvas/LoopCardNode.ts";
+import { CARD_WIDTH, LoopCardNode, onUserLinkDrop, OUTPUT_SLOTS, outputSlotFor, registerLoopCardNode, TITLE_FIELD, type UserLinkDrop } from "../app/canvas/LoopCardNode.ts";
 import { FieldWidget } from "../app/canvas/widgets/FieldWidget.ts";
 import type { LoopNode } from "../app/daemon/protocol.ts";
 import { validateNodeType, type NodeTypeDef } from "../app/nodes/registry.ts";
@@ -13,10 +13,9 @@ let goal: NodeTypeDef;
 let timed: NodeTypeDef;
 beforeAll(async () => { goal = await load("agent/goal"); timed = await load("agent/timed"); });
 
-/** A CardHost whose four methods are typed mocks (a bare `vi.fn()` does not satisfy CardHost's call signatures). */
+/** A CardHost whose three methods are typed mocks (a bare `vi.fn()` does not satisfy CardHost's call signatures). */
 const host = () => ({
   onChanged: vi.fn<(card: LoopCardNode) => void>(),
-  onAction: vi.fn<(card: LoopCardNode, action: CardAction) => void>(),
   onEditField: vi.fn<(card: LoopCardNode, widget: FieldWidget) => void>(),
   onRename: vi.fn<(card: LoopCardNode, title: string) => void>(),
 });
@@ -38,10 +37,10 @@ const field = (c: LoopCardNode, name: string) => (c.widgets ?? []).find((w): w i
 const badgeText = (c: LoopCardNode) => (c.badges[0] as LGraphBadge).text;
 
 describe("a draft card", () => {
-  it("builds a title field, the type's widgets in order, the buttons and the status block", () => {
+  it("builds a title field, the type's widgets in order, and the status block", () => {
     const c = card();
     c.setup(goal, { type: "agent/goal", title: "", values: {} });
-    expect(widgetNames(c)).toEqual([TITLE_FIELD, "summary", "predicate", "Model", "Backend", "actions", "status"]);
+    expect(widgetNames(c)).toEqual([TITLE_FIELD, "summary", "predicate", "Model", "Backend", "status"]);
     expect(c.cardMode).toBe("draft");
     expect(c.nodeType).toBe("agent/goal");
     expect(c.values).toEqual({ summary: "", predicate: "", model: "standard", backend: "claudeCode" });
@@ -53,19 +52,14 @@ describe("a draft card", () => {
     expect(c.resizable).toBe(true);
   });
 
-  it("names its problems and disables Start until they are fixed", () => {
+  it("names its problems until they are fixed", () => {
     const h = host();
     const c = card(h);
     c.setup(goal, { type: "agent/goal", title: "", values: {} });
     expect(c.problems()).toEqual(["Goal is required."]);
-    const start = (c.widgets ?? []).find((w) => w.name === "actions") as unknown as { buttons: Array<{ label: string; enabled: boolean; onClick(): void }> };
-    expect(start.buttons.map((b) => [b.label, b.enabled])).toEqual([["Start", false]]);
     c.setValue("summary", "Ship it");
     expect(c.problems()).toEqual([]);
-    expect(start.buttons[0]!.enabled).toBe(true);
     expect(h.onChanged).toHaveBeenCalledWith(c);
-    start.buttons[0]!.onClick();
-    expect(h.onAction).toHaveBeenCalledWith(c, "start");
     expect(c.draft()).toMatchObject({ id: String(c.id), title: "", loopType: "goalBased", goal: { summary: "Ship it" } });
   });
 
@@ -114,11 +108,9 @@ describe("a draft card", () => {
     c.markStarting();
     expect(c.cardMode).toBe("starting");
     expect(badgeText(c)).toBe("STARTING");
-    const start = (c.widgets ?? []).find((w) => w.name === "actions") as unknown as { buttons: Array<{ enabled: boolean }> };
-    expect(start.buttons[0]!.enabled).toBe(false);
     c.revertToDraft();
     expect(c.cardMode).toBe("draft");
-    expect(start.buttons[0]!.enabled).toBe(true);
+    expect(badgeText(c)).toBe("DRAFT");
     c.applyLive(live(), goal);
     c.markStarting();
     expect(c.cardMode).toBe("live");
@@ -140,7 +132,7 @@ describe("a draft card", () => {
 });
 
 describe("a live card", () => {
-  it("shows the loop's values read-only, its state, and Stop and Restart", () => {
+  it("shows the loop's values read-only and its state", () => {
     const h = host();
     const c = card(h);
     c.applyLive(live(), goal);
@@ -154,12 +146,8 @@ describe("a live card", () => {
     expect(model.value).toBe("capable");
     expect(model.readOnly).toBe(true);
     expect(badgeText(c)).toBe("RUNNING");
-    const actions = (c.widgets ?? []).find((w) => w.name === "actions") as unknown as { buttons: Array<{ label: string; enabled: boolean; onClick(): void }> };
-    expect(actions.buttons.map((b) => [b.label, b.enabled])).toEqual([["Stop", true], ["Restart", true]]);
-    actions.buttons[0]!.onClick();
-    expect(h.onAction).toHaveBeenCalledWith(c, "stop");
     c.applyLive(live({ state: { idle: {} } }), goal);
-    expect(actions.buttons[0]!.enabled).toBe(false);
+    expect(badgeText(c)).toBe("IDLE");
   });
 
   it("renames through its host and keeps the daemon's title until it answers", () => {
@@ -177,9 +165,9 @@ describe("a live card", () => {
   it("draws without fields until its type is known, then with them", () => {
     const c = card();
     c.applyLive(live(), null);
-    expect(widgetNames(c)).toEqual([TITLE_FIELD, "actions", "status"]);
+    expect(widgetNames(c)).toEqual([TITLE_FIELD, "status"]);
     c.applyLive(live(), goal);
-    expect(widgetNames(c)).toEqual([TITLE_FIELD, "summary", "predicate", "Model", "Backend", "actions", "status"]);
+    expect(widgetNames(c)).toEqual([TITLE_FIELD, "summary", "predicate", "Model", "Backend", "status"]);
   });
 
   it("flips a draft to live on the daemon's echo, keeping its size", () => {
@@ -209,13 +197,6 @@ describe("a live card", () => {
     model.callback?.("capable");
     expect(c.values.model).toBe("standard");
     expect(model.value).toBe("standard");
-  });
-});
-
-describe("canStop", () => {
-  it("allows Stop only while the loop is unresolved and running in some sense", () => {
-    for (const state of ["running", "awaitingInput", "blocked", "stalled", "waiting"]) expect(canStop(live({ state: { [state]: {} } }))).toBe(true);
-    for (const state of ["idle", "succeeded", "failed", "stopped"]) expect(canStop(live({ state: { [state]: {} } }))).toBe(false);
   });
 });
 
