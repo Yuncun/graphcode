@@ -11,6 +11,8 @@ import { resolveSocketPath } from "./socketPath.ts";
 import { serveStatic } from "./static.ts";
 import { defaultWorkflowsDir, listWorkflows, readWorkflow, writeWorkflow } from "./workflowFiles.ts";
 import { WORKFLOW_NAME } from "../shared/workflowName.ts";
+import { createDocumentStore, defaultDocumentsDir, MissingDocumentError } from "./workflowDocuments.ts";
+import { DOCUMENT_ID, DocumentFormatError, readDocumentCanvas, readDocumentMetadata, readWorkflowDocument } from "../shared/workflowDocument.ts";
 
 export interface BridgeOptions {
   port: number;
@@ -20,6 +22,8 @@ export interface BridgeOptions {
   nodeTypeRoots?: NodeTypeRoots;
   /** Default: `~/.graphcode/workflows`. */
   workflowsDir?: string;
+  /** Default: `~/.graphcode/documents`, independent of project folders. */
+  documentsDir?: string;
 }
 
 /** Where `pnpm dev` serves the app from; it proxies /ws and /api through to the bridge. */
@@ -74,6 +78,7 @@ export async function startBridge(options: BridgeOptions): Promise<{ port: numbe
   const serveApp = options.distDir ? serveStatic(options.distDir) : null;
   const nodeTypeRoots = options.nodeTypeRoots ?? defaultNodeTypeRoots(BUILTIN_NODES_DIR);
   const workflowsDir = options.workflowsDir ?? defaultWorkflowsDir();
+  const documents = createDocumentStore(options.documentsDir ?? defaultDocumentsDir());
   const json = (res: http.ServerResponse, status: number, body: unknown) => {
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
@@ -86,6 +91,43 @@ export async function startBridge(options: BridgeOptions): Promise<{ port: numbe
       // get the same Host half of that check (Origin/CORS already covers a browser fetch; this
       // closes the gap a rebound page would otherwise walk through).
       if (url.pathname.startsWith("/api/") && !acceptsHost(req, boundPort)) { res.writeHead(403); res.end(); return; }
+      if (url.pathname === "/api/projects/resolve") {
+        if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
+        const project = await projectFromQuery(req);
+        if (!project) { json(res, 400, { error: "project must be an absolute path to an existing directory" }); return; }
+        json(res, 200, { project: await fs.promises.realpath(project) });
+        return;
+      }
+      if (url.pathname === "/api/documents") {
+        if (req.method !== "GET") { res.writeHead(405); res.end(); return; }
+        json(res, 200, { documents: await documents.list() });
+        return;
+      }
+      if (url.pathname === "/api/documents/file" || url.pathname === "/api/documents/canvas") {
+        const id = url.searchParams.get("id") ?? "";
+        if (!DOCUMENT_ID.test(id)) { json(res, 400, { error: "invalid workflow document identifier" }); return; }
+        const canvasOnly = url.pathname.endsWith("/canvas");
+        if (req.method === "GET") {
+          const doc = await documents.read(id);
+          if (!doc) { json(res, 404, { error: "workflow document not found" }); return; }
+          json(res, 200, canvasOnly ? doc.canvas : doc);
+          return;
+        }
+        if (req.method !== "PUT" && (req.method !== "PATCH" || canvasOnly)) { res.writeHead(405); res.end(); return; }
+        if (!acceptsHandshake(req, boundPort)) { res.writeHead(403); res.end(); return; }
+        try {
+          const body: unknown = JSON.parse(await readBody(req));
+          if (canvasOnly) await documents.canvas(id, readDocumentCanvas(body));
+          else if (req.method === "PATCH") await documents.metadata(id, readDocumentMetadata(body));
+          else await documents.put(readWorkflowDocument(body, id));
+          res.writeHead(204); res.end();
+        } catch (error) {
+          if (error instanceof DocumentFormatError || error instanceof SyntaxError) json(res, 400, { error: "the workflow document is not valid" });
+          else if (error instanceof MissingDocumentError) json(res, 404, { error: error.message });
+          else throw error;
+        }
+        return;
+      }
       if (url.pathname === "/api/canvas") {
         const project = await projectFromQuery(req);
         if (!project) { res.writeHead(400, { "content-type": "application/json" }); res.end('{"error":"project must be an absolute path to an existing directory"}'); return; }

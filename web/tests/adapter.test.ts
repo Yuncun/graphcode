@@ -36,6 +36,39 @@ const layout = (): CanvasDoc => emptyCanvasDoc();
 const ids = (a: GraphAdapter) => a.cards().map((c) => String(c.id)).sort();
 
 describe("GraphAdapter: the daemon's side", () => {
+  it("refreshes draft definitions when the chosen folder supplies a different pack, and blocks missing types", () => {
+    const a = make();
+    const source = a.addDraft("agent/goal", [0, 0], { values: { summary: "Keep the user's brief" } })!;
+    const target = a.addDraft("agent/goal", [350, 0])!;
+    a.addDraftLink(source, 0, target);
+    const original = source.def!;
+    const replacement = { ...original, title: "Project goal", outputs: [{ name: "message", type: "message" as const }], toDraft: () => ({ loopType: "sketch" as const }) };
+    a.types = types.map((entry) => entry.type === original.type ? { ...entry, ok: true, def: replacement } : entry);
+    expect(source.getTitle()).toBe("Project goal");
+    expect(source.draft().loopType).toBe("sketch");
+    expect(source.values.summary).toBe("Keep the user's brief");
+    expect(a.draftEdges()).toHaveLength(1);
+    a.types = types.filter((entry) => entry.type !== original.type);
+    expect(source.problems().join(" ")).toContain("not loaded");
+    a.types = types;
+    expect(source.draft().loopType).toBe("goalBased");
+    expect(source.values.summary).toBe("Keep the user's brief");
+  });
+
+  it("restores previously unavailable draft types when a pack becomes available", () => {
+    const a = make();
+    const saved: CanvasDoc = { version: 2, nodes: { A: { pos: [12, 34] } }, drafts: { A: { type: "custom/review", title: "Saved review", values: { summary: "Preserve me" } } }, draftEdges: [] };
+    a.sync(g([], []), saved);
+    expect(a.cards()).toHaveLength(0);
+    expect(() => a.workflow("Unresolved")).toThrow(/not loaded/i);
+    const base = types.find((entry) => entry.ok && entry.type === "agent/goal")!;
+    if (!base.ok) throw new Error("goal fixture is unavailable");
+    a.types = [...types, { type: "custom/review", source: "project", ok: true, def: { ...base.def, type: "custom/review" } }];
+    a.sync(g([], []), saved);
+    expect(a.card("A")?.record()).toMatchObject({ type: "custom/review", title: "Saved review", values: { summary: "Preserve me" } });
+    expect(a.document().nodes.A!.pos).toEqual([12, 34]);
+  });
+
   it("mirrors nodes and edges, then removes what the daemon dropped", () => {
     const a = make();
     a.sync(g([n("A"), n("B"), n("C")], [["A", "B", "handoff"], ["A", "C", "message"], ["B", "C", "handoff"]]), layout());

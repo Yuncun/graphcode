@@ -7,7 +7,7 @@ import { startBridge } from "../../server/main.ts";
 import { alphaGraph, betaGraph } from "./graph.ts";
 import { startScriptedDaemon, type ScriptedDaemon } from "./scriptedDaemon.ts";
 
-export interface HarnessDirs { alpha: string; beta: string; gamma: string; userNodesDir: string; workflowsDir: string }
+export interface HarnessDirs { alpha: string; beta: string; gamma: string; userNodesDir: string; workflowsDir: string; documentsDir: string }
 
 export interface Harness extends HarnessDirs {
   url: string;
@@ -27,7 +27,7 @@ export interface LaunchOptions {
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 export async function launch({ daemonUp = true, before }: LaunchOptions = {}): Promise<Harness> {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "gcw-e2e-"));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "gcw-e2e-")));
   const dirs: HarnessDirs = {
     alpha: path.join(root, "alpha"),
     beta: path.join(root, "beta"),
@@ -35,6 +35,7 @@ export async function launch({ daemonUp = true, before }: LaunchOptions = {}): P
     gamma: path.join(root, "gamma"),
     userNodesDir: path.join(root, "user-nodes"),
     workflowsDir: path.join(root, "workflows"),
+    documentsDir: path.join(root, "documents"),
   };
   for (const d of [dirs.alpha, dirs.beta, dirs.userNodesDir]) fs.mkdirSync(d, { recursive: true });
   before?.(dirs);
@@ -54,6 +55,7 @@ export async function launch({ daemonUp = true, before }: LaunchOptions = {}): P
     distDir: path.join(WEB_ROOT, "dist"),
     nodeTypeRoots: { builtin: path.join(WEB_ROOT, "nodes"), user: dirs.userNodesDir },
     workflowsDir: dirs.workflowsDir,
+    documentsDir: dirs.documentsDir,
   });
   return {
     ...dirs,

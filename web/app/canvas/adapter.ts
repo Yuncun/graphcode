@@ -24,7 +24,7 @@ interface Orphans { drafts: Record<string, CardRecord>; nodes: Record<string, Pl
 export class GraphAdapter {
   readonly lgraph: LGraph;
   /** The loaded node types; GraphCanvas sets this whenever they change. */
-  types: NodeTypeEntry[] = [];
+  private nodeTypes: NodeTypeEntry[] = [];
   private readonly host: CardHost;
   private readonly newID: () => string;
   private readonly linkByEdge = new Map<string, LLink>();
@@ -39,6 +39,24 @@ export class GraphAdapter {
     this.host = host;
     this.newID = newID;
     registerLoopCardNode();
+  }
+
+  get types(): NodeTypeEntry[] { return this.nodeTypes; }
+
+  set types(types: NodeTypeEntry[]) {
+    if (types === this.nodeTypes) return;
+    this.nodeTypes = types;
+    for (const card of this.cards()) {
+      if (card.cardMode !== "draft") continue;
+      const def = defByName(types, card.nodeType);
+      if (def === card.def) continue;
+      if (def) card.setup(def, card.record());
+      else { card.def = null; card.refresh(); }
+    }
+    if (this.restored && Object.keys(this.orphans.drafts).length) {
+      this.restoreDrafts({ version: 2, nodes: this.orphans.nodes, drafts: this.orphans.drafts, draftEdges: this.orphans.edges });
+    }
+    this.refreshInputLabels();
   }
 
   cards(): LoopCardNode[] {
@@ -210,8 +228,9 @@ export class GraphAdapter {
 
   /** Draft definitions and internal wires, for either the selected cards or every typed card. */
   workflow(name: string, selectedIDs?: readonly string[]): WorkflowFile {
+    if (!selectedIDs && Object.keys(this.restored ? this.orphans.drafts : this.pendingOrphans().drafts).length) throw new Error("Some node types are not loaded. Resolve them before exporting the complete workflow.");
     const selected = selectedIDs ? new Set(selectedIDs) : null;
-    const included = this.cards().filter((card) => selected ? selected.has(String(card.id)) : card.def);
+    const included = this.cards().filter((card) => !selected || selected.has(String(card.id)));
     for (const card of included) {
       if (!card.def || !defByName(this.types, card.nodeType)) throw new Error(`node type for "${card.title || card.id}" is not loaded`);
     }
