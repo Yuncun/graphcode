@@ -114,18 +114,19 @@ The Delete key removes a draft outright and asks before a live card is deleted. 
 its input removes a draft wire outright and asks before a live edge is deleted. litegraph's context
 menus and search box are off.
 
-Drag empty canvas to select a rectangle of cards. Shift-click adds to the selection; **Select all**
-or Cmd/Ctrl+A selects every card. Space+drag or middle-button drag pans; the wheel pans and
-Ctrl+wheel zooms. These gestures use LiteGraph's standard navigation mode.
+Drag empty canvas to pan; Cmd/Ctrl+drag selects a rectangle of cards. Shift-click adds to the
+selection, and Cmd/Ctrl+A selects every card. Space+drag and middle-button drag also pan; the wheel
+zooms. These gestures use LiteGraph's original navigation mode.
 
 ## Workflows
 
 The **+** tab button creates an independent document. Double-click its tab name to rename it.
 Closing a workflow tab finishes its pending save; it does not delete the document or stop agents.
-Reopen it under **Workflows → Autosaved workflows**. Existing project canvases remain available.
+Reopen it in the **Workflows** sidebar. Existing project canvases remain available.
 
 For an unbound workflow, the first **Run** asks for a local folder and waits for the daemon to confirm
-it. Folder aliases and trailing slashes resolve to the daemon's canonical path. Review the folder's
+it. Hover over Run to see the attached folder. Folder aliases and trailing slashes resolve to the
+daemon's canonical path. Review the folder's
 loaded node definitions, then press **Run** again to start. A folder's
 custom packs can change a draft's fields and behavior; unavailable types block execution.
 The workflow saves its node identities before sending any commands and shows only its own agents,
@@ -135,23 +136,23 @@ it does not turn unavailable running agents into new drafts.
 Canvas writes are ordered and files replaced atomically. Metadata edits preserve concurrent canvas
 saves. Invalid or unreadable documents produce errors instead of silently becoming empty workflows.
 
-**Copy** or Cmd/Ctrl+C copies selected cards and only the wires between them as GraphCode workflow
-JSON on the system clipboard. **Paste** or Cmd/Ctrl+V inserts fresh draft cards near the last canvas
+Cmd/Ctrl+C copies selected cards and only the wires between them as GraphCode workflow
+JSON on the system clipboard. Cmd/Ctrl+V inserts fresh draft cards near the last canvas
 pointer position and selects them. Names, custom values, sizes, relative positions, and exact wire
 kinds and conditions are preserved. Live cards are copied as draft definitions; originals are never
 started, renamed, or deleted. Copy/paste works between workflow/project tabs, browser tabs, and workflow JSON
 in a text editor. Text fields keep their normal text selection and clipboard shortcuts.
 
-The whole paste is refused if the JSON is malformed or a node type is unavailable. Browser clipboard
-permission errors appear in the footer, without falling back to an older copy. A pending toolbar
-paste is cancelled if the active project tab changes before the clipboard read completes.
+The whole paste is refused if the JSON is malformed or a node type is unavailable. Clipboard
+events use the browser's normal copy/paste path, without a cached fallback or background reads.
+Pasting while a different canvas is still loading is refused instead of changing the previous canvas.
 
-**Save workflow…** writes every card (live ones through the type's `fromLoop`) and every wire to
-`~/.graphcode/workflows/<name>.json`. **Reusable templates** lists those files; clicking one loads it onto
+**Save template…** writes every card (live ones through the type's `fromLoop`) and every wire to
+`~/.graphcode/workflows/<name>.json`. **Templates** lists those files; clicking one loads it onto
 the current canvas as drafts with fresh ids, or creates a folder-free document if no canvas is open.
 Like paste, loading
 refuses malformed files or unavailable node types before adding any cards. Recent projects are on
-the Projects tab. `e2e/clipboard-selection.spec.ts` covers selection, clipboard transfers, permissions,
+the Projects tab. `e2e/clipboard-selection.spec.ts` covers selection, clipboard transfers,
 text-field isolation, and navigation against temporary projects and the scripted daemon.
 `e2e/workflow-documents.spec.ts` covers folder-free authoring, autosave, reopening, copying between
 workflow tabs, deferred folder attachment and isolation from unrelated project agents.

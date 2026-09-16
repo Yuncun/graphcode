@@ -44,7 +44,6 @@ const emit = defineEmits<{
   /** A live edge picked off its input: likewise. */
   deleteEdge: [edgeID: string];
   documentChanged: [counts: DocumentCounts];
-  selectionChanged: [count: number];
   problem: [message: string];
 }>();
 const hostEl = ref<HTMLDivElement | null>(null);
@@ -66,7 +65,6 @@ const saves = createSaveScheduler({ delayMs: SAVE_DELAY_MS, save: async (project
 let shows = 0;
 /** The view whose graph the canvas is drawing. */
 let shown: ProjectView | null = null;
-let tabChanges = 0;
 
 /** What every card asks of the canvas. */
 const host: CardHost = {
@@ -169,28 +167,6 @@ function onPaste(event: ClipboardEvent): void {
   } catch (error) { clipboardProblem("paste", error); }
 }
 
-async function copySelection(): Promise<void> {
-  try {
-    const text = selectionText();
-    if (!navigator.clipboard) throw new Error("Clipboard access is unavailable. Use Cmd/Ctrl+C on the canvas.");
-    canvasEl.value?.focus();
-    await navigator.clipboard.writeText(text);
-  } catch (error) { clipboardProblem("copy", error); }
-}
-
-async function pasteClipboard(): Promise<void> {
-  const view = shown;
-  const tab = tabChanges;
-  try {
-    if (!view || !canvas) throw new Error("The canvas is not ready.");
-    if (!navigator.clipboard) throw new Error("Clipboard access is unavailable. Use Cmd/Ctrl+V on the canvas.");
-    const at: [number, number] = [canvas.graph_mouse[0], canvas.graph_mouse[1]];
-    const text = await navigator.clipboard.readText();
-    if (tab !== tabChanges || props.graph.project.path !== view.project) throw new Error("The active canvas changed. Paste again in the intended canvas.");
-    pasteText(text, view, at);
-  } catch (error) { clipboardProblem("paste", error); }
-}
-
 async function show(graph: LoopGraph): Promise<void> {
   const token = ++shows;
   const view = await viewFor(graph.project.path);
@@ -289,10 +265,7 @@ onMounted(async () => {
   const element = canvasEl.value;
   const hostElement = hostEl.value;
   if (!element || !hostElement) return;
-  LiteGraph.canvasNavigationMode = "standard";
-  // LiteGraph gates wheel panning behind its trackpad options, even in standard navigation mode.
-  LiteGraph.macTrackpadGestures = true;
-  LiteGraph.macGesturesRequireMac = false;
+  LiteGraph.canvasNavigationMode = "legacy";
   // The constructor starts litegraph's render loop; stopRendering() below pairs with it.
   canvas = new LGraphCanvas(element, view.adapter.lgraph);
   editor = new FieldEditor(hostElement);
@@ -314,7 +287,6 @@ onMounted(async () => {
   canvas.onSelectionChange = (selected) => {
     const ids = Object.keys(selected);
     emit("select", ids.length === 1 ? ids[0]! : null);
-    emit("selectionChanged", selectionIDs().length);
   };
   // The editor sits over its field. litegraph draws a frame whenever the canvas is dirty, and a pan
   // or zoom marks it dirty, so placing the editor again on every drawn frame keeps it on its field.
@@ -395,7 +367,6 @@ watch(() => props.graph, (graph, previous) => {
   // A deep change to the same graph reports the same object as `previous`, so this only fires
   // when the tab really changed: save the project being left before its debounce runs out.
   if (previous && previous.project.path !== graph.project.path) {
-    tabChanges++;
     saves.flush(previous.project.path);
   }
   void show(graph);
@@ -408,9 +379,6 @@ watch(() => [props.nodeTypes, props.typesLoading], () => {
 
 defineExpose({
   ready: (project: string) => viewFor(project),
-  selectAll,
-  copySelection,
-  pasteClipboard,
   /** App.vue closes a project that is not the one on screen without the watch above ever firing, so it calls this. */
   flushSave: (project: string) => {
     saves.clear(project);
@@ -439,7 +407,6 @@ defineExpose({
 });
 
 onBeforeUnmount(() => {
-  tabChanges++;
   window.removeEventListener("resize", fit);
   resizeObserver?.disconnect();
   onUserLinkDrop(null);
