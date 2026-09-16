@@ -12,7 +12,7 @@ import { FieldWidget } from "./widgets/FieldWidget.ts";
 import { StatusWidget } from "./widgets/StatusWidget.ts";
 
 export const CARD_WIDTH = 300;
-/** The title field's widget name; no node type may use it. */
+/** The header editor's field name; no node type may use it. */
 export const TITLE_FIELD = "__title";
 
 export type CardMode = "draft" | "starting" | "live";
@@ -22,7 +22,7 @@ export interface CardHost {
   /** A value, title or size changed: the layout wants saving. */
   onChanged(card: LoopCardNode): void;
   onEditField(card: LoopCardNode, widget: FieldWidget): void;
-  /** A live card's title field was committed with a new title. */
+  /** A live card's header editor commits a new title. */
   onRename(card: LoopCardNode, title: string): void;
 }
 
@@ -34,7 +34,7 @@ const valueText = (value: unknown): string => value == null ? "" : typeof value 
 
 export interface OutputSlotDef { name: string; kind: EdgeKind; condition: EdgeCondition }
 
-/** The card's outputs in slot order. A drag from one of them makes a wire of that kind and condition. */
+/** Canonical default ports, also used while a card's node definition is unavailable. */
 export const OUTPUT_SLOTS: readonly OutputSlotDef[] = [
   { name: "handoff", kind: "handoff", condition: "always" },
   { name: "on success", kind: "handoff", condition: "onSuccess" },
@@ -42,12 +42,6 @@ export const OUTPUT_SLOTS: readonly OutputSlotDef[] = [
   { name: "message", kind: "message", condition: "always" },
   { name: "spawn", kind: "spawn", condition: "always" },
 ];
-
-/** The output slot that draws an edge of this kind and condition. Message and spawn have one slot each, whatever the condition. */
-export function outputSlotFor(kind: EdgeKind, condition: EdgeCondition): number {
-  const index = OUTPUT_SLOTS.findIndex((s) => s.kind === kind && (kind !== "handoff" || s.condition === condition));
-  return index === -1 ? 0 : index;
-}
 
 const typeColor: Record<LoopType, string> = { sketch: "#8a8f99", goalBased: "#2f8f6b", timeBased: "#b8860b", turnBased: "#8a5cc7", proactive: "#3b7dd8" };
 const stateColor: Record<LoopStateName, string> = {
@@ -82,7 +76,7 @@ export function onUserLinkDrop(handler: ((drop: UserLinkDrop) => void) | null): 
 
 /**
  * One card: a draft the user is composing, a draft the daemon has been asked for (starting), or a
- * loop the daemon reports (live). Its widgets come from its node type: a title field, one widget per
+ * loop the daemon reports (live). Its body contains one widget per
  * `widgets` entry (text fields drawn here, combo/number/toggle from litegraph), and the status block.
  * No buttons: as in ComfyUI, the toolbar's one Run sends every draft, and Stop and Restart stay in
  * the Swift app and the CLI. litegraph lays them out under the slot rows and grows the card to fit; a multiline
@@ -101,7 +95,8 @@ export class LoopCardNode extends LGraphNode {
   /** Set once a height came from anywhere but `fitHeight`; sync then leaves the height alone. */
   userResized = false;
   private sizing = false;
-  private readonly titleField = new FieldWidget(TITLE_FIELD, "Title", "", { placeholder: "Optional; a loop names itself once it starts" });
+  private readonly titleField = new FieldWidget(TITLE_FIELD, "Node name", "");
+  private outputSpecs: OutputSlotDef[] = [];
   private readonly fields = new Map<string, FieldWidget>();
   private readonly builtins = new Map<string, ValueWidget>();
   private readonly status = new StatusWidget();
@@ -114,17 +109,18 @@ export class LoopCardNode extends LGraphNode {
     this.block_delete = true;
     this.clonable = false;
     this.bgcolor = "#23262c";
+    this.titleField.boxRect = (node) => [28, 2 - LiteGraph.NODE_TITLE_HEIGHT, node.size[0]! - 36, LiteGraph.NODE_TITLE_HEIGHT - 4];
     // addOutput grows the node to fit on its own; that growth is not the user's resize.
     this.sizing = true;
     try {
-      for (const slot of OUTPUT_SLOTS) this.addOutput(slot.name, slot.kind);
+      this.configureOutputs(OUTPUT_SLOTS);
       this.size = [CARD_WIDTH, this.computeSize()[1]];
     } finally {
       this.sizing = false;
     }
   }
 
-  /** Builds the card for a node type: title field, the type's widgets in order, status. */
+  /** Builds the editable header, type-specific ports and body widgets, and status. */
   setup(def: NodeTypeDef, record: CardRecord): void {
     this.def = def;
     this.nodeType = record.type;
@@ -137,7 +133,7 @@ export class LoopCardNode extends LGraphNode {
       this.fields.clear();
       this.builtins.clear();
       this.titleField.value = this.title;
-      this.addCustomWidget(this.titleField as unknown as IWidget);
+      this.configureOutputs(def.outputs.map((slot) => ({ name: slot.name, kind: slot.type, condition: slot.condition ?? "always" })));
       for (const w of def.widgets) this.addWidgetFor(w);
       this.addCustomWidget(this.status as unknown as IWidget);
     } finally {
@@ -145,6 +141,62 @@ export class LoopCardNode extends LGraphNode {
     }
     this.refresh();
     this.fitHeight();
+  }
+
+  get titleEditor(): FieldWidget {
+    return this.titleField;
+  }
+
+  override getTitle(): string {
+    return this.title || this.def?.title || "Loop";
+  }
+
+  override onNodeTitleDblClick(): void {
+    if (!this.titleField.readOnly) this.onEditField(this.titleField);
+  }
+
+  outputDefinition(index: number): OutputSlotDef | undefined {
+    return this.outputSpecs[index];
+  }
+
+  hasOutputLinkTo(node: LGraphNode, slot: number): boolean {
+    return [...(this.graph?.links.values() ?? [])].some((link) => link.origin_id === this.id && link.target_id === node.id && link.origin_slot === slot);
+  }
+
+  override canConnectTo(...args: Parameters<LGraphNode["canConnectTo"]>): boolean {
+    const [node, , output] = args;
+    // MovingInputLink disconnects its original before onConnectInput, so duplicates must fail the hover/drop check.
+    if (!adapterIsConnecting && node instanceof LoopCardNode && this.hasOutputLinkTo(node, this.outputs.findIndex((slot) => slot === output))) return false;
+    return super.canConnectTo(...args);
+  }
+
+  /** A saved edge can use a canonical port that its current node pack does not advertise. */
+  outputSlot(kind: EdgeKind, condition: EdgeCondition): number {
+    const index = this.outputSpecs.findIndex((slot) => slot.kind === kind && slot.condition === condition);
+    if (index !== -1) return index;
+    const standard = OUTPUT_SLOTS.find((slot) => slot.kind === kind && slot.condition === condition);
+    const name = standard?.name ?? `${kind} ${condition === "onSuccess" ? "on success" : "on failure"}`;
+    this.outputSpecs.push({ name, kind, condition });
+    const sizing = this.sizing;
+    this.sizing = true;
+    try { this.addOutput(name, kind); } finally { this.sizing = sizing; }
+    return this.outputSpecs.length - 1;
+  }
+
+  private configureOutputs(specs: readonly OutputSlotDef[]): void {
+    const connected = this.outputs.some((output) => output.links?.length);
+    for (let i = this.outputs.length - 1; i >= 0; i--) {
+      const current = this.outputSpecs[i]!;
+      if (this.outputs[i]!.links?.length) continue;
+      if (connected && specs.some((slot) => slot.kind === current.kind && slot.condition === current.condition)) continue;
+      this.removeOutput(i);
+      this.outputSpecs.splice(i, 1);
+    }
+    for (const spec of specs) {
+      const index = this.outputSlot(spec.kind, spec.condition);
+      this.outputSpecs[index] = { ...spec };
+      this.outputs[index]!.name = spec.name;
+    }
   }
 
   private addWidgetFor(w: WidgetDef): void {
@@ -196,7 +248,8 @@ export class LoopCardNode extends LGraphNode {
     if (widget === this.titleField) {
       const title = text.trim();
       if (this.cardMode === "live") {
-        if (title && title !== this.title) this.host?.onRename(this, title);
+        const name = title || this.def?.title || "Loop";
+        if (name !== this.title) this.host?.onRename(this, name);
         this.titleField.value = this.title;
         this.setDirtyCanvas(true, true);
         return;
@@ -246,7 +299,6 @@ export class LoopCardNode extends LGraphNode {
       this.fields.clear();
       this.builtins.clear();
       this.titleField.value = title;
-      this.addCustomWidget(this.titleField as unknown as IWidget);
       this.addCustomWidget(this.status as unknown as IWidget);
     } finally {
       this.sizing = false;
@@ -292,6 +344,7 @@ export class LoopCardNode extends LGraphNode {
 
   /** Everything that follows from mode, values and loop: colour, badge, read-only state, status lines. */
   refresh(): void {
+    const statusHeight = this.status.computeLayoutSize().minHeight;
     this.color = typeColor[this.loopTypeGuess()] ?? typeColor.sketch;
     const live = this.cardMode === "live";
     const starting = this.cardMode === "starting";
@@ -307,8 +360,9 @@ export class LoopCardNode extends LGraphNode {
       this.badges = [new LGraphBadge({ text: starting ? "STARTING" : "DRAFT", bgColor: starting ? "#3b82f6" : "#6b7079", fgColor: "#ffffff" })];
       this.status.warning = this.problems()[0] ?? "";
       this.status.live = "";
-      this.status.meta = `${this.def?.title ?? this.nodeType} · not started`;
+      this.status.meta = "";
     }
+    if (this.status.computeLayoutSize().minHeight !== statusHeight) this.fitHeight();
     this.setDirtyCanvas(true, true);
   }
 

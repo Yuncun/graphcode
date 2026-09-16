@@ -136,6 +136,35 @@ describe("GraphAdapter: the daemon's side", () => {
 });
 
 describe("GraphAdapter: the user's side", () => {
+  it("fans one output into different nodes without duplicating an identical connection", () => {
+    const a = make();
+    const source = a.addDraft("agent/main", [0, 0], { title: "Choose scope" })!;
+    const left = a.addDraft("agent/goal", [400, 0])!;
+    const right = a.addDraft("agent/goal", [400, 400])!;
+    a.addDraftLink(source, 0, left);
+    a.addDraftLink(source, 0, right);
+    expect(a.addDraftLink(source, 0, right)).toBe(null);
+    expect(a.lgraph.links.size).toBe(2);
+    expect(source.outputs[0]!.links).toHaveLength(2);
+    expect(left.inputs[0]!.label).toBe("After Choose scope");
+    expect(right.inputs[0]!.label).toBe("After Choose scope");
+  });
+
+  it("preserves saved ports outside a node definition and conditional message edges", () => {
+    const a = make();
+    const saved = g([n("A", "Scope", { loopType: "sketch" }), n("B")], [
+      ["A", "B", "handoff", "onFailure"], ["A", "B", "message", "onSuccess"],
+    ]);
+    a.sync(saved, layout());
+    expect(a.lgraph.links.size).toBe(2);
+    expect(a.workflow("saved").edges).toEqual([
+      { from: "A", to: "B", kind: "handoff", condition: "onFailure" },
+      { from: "A", to: "B", kind: "message", condition: "onSuccess" },
+    ]);
+    a.sync(saved, layout());
+    expect(a.lgraph.links.size).toBe(2);
+  });
+
   it("makes a draft where it is dropped, keeps it across syncs, and removes it on request", () => {
     const a = make();
     a.sync(g([n("A")], []), layout());

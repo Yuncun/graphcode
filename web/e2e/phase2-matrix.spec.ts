@@ -129,7 +129,8 @@ async function selectCard(page: Page, project: string, id: string): Promise<void
 /** Types into a card's text field through the editor and commits with ⌘Enter (multiline) or Enter. */
 async function fillField(page: Page, project: string, id: string, name: string, text: string, multiline = true): Promise<void> {
   const p = await widgetPoint(page, project, id, name);
-  await page.mouse.click(p.x, p.y);
+  if (name === TITLE_FIELD) await page.mouse.dblclick(p.x, p.y, { delay: 60 });
+  else await page.mouse.click(p.x, p.y);
   const editor = page.getByTestId("field-editor");
   await expect(editor).toBeVisible();
   await expect(editor).toHaveAttribute("data-field", name);
@@ -421,7 +422,26 @@ test.describe("phase 2 surface", () => {
     expect(h.pageErrors).toEqual([]);
   });
 
-  test("P2-12 the title field renames a live loop through the daemon, and a draft's title locally", async ({ page }) => {
+  test("rejects moving a wire onto a duplicate input without deleting either connection", async ({ page }) => {
+    h = await launch();
+    await openBeta(page, h);
+    const id = await dropType(page, "agent/goal", await emptyPoint(page));
+    await dragLink(page, h.beta, id, 0, ID.betaOne);
+    await dragLink(page, h.beta, id, 0, ID.betaTwo);
+    await expect.poll(() => g(page)).toEqual({ drafts: 1, wires: 2 });
+    const from = await cardPoint(page, h.beta, ID.betaOne, [INPUT_SLOT_X, slotY(0)]);
+    const to = await cardPoint(page, h.beta, ID.betaTwo, [INPUT_SLOT_X, slotY(1)]);
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 15 });
+    await page.mouse.up();
+    await expect.poll(() => g(page)).toEqual({ drafts: 1, wires: 2 });
+    await expect.poll(() => canvasJSON(h.beta)?.draftEdges.length).toBe(2);
+    expect(receivedGraphCommands(h, "createEdge")).toEqual([]);
+    expect(h.pageErrors).toEqual([]);
+  });
+
+  test("P2-12 the header renames a live loop through the daemon, and a draft's title locally", async ({ page }) => {
     h = await launch();
     await openAlpha(page, h);
     await fillField(page, h.alpha, ID.plan, TITLE_FIELD, "Plan v2", false);

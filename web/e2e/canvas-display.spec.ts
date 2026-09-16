@@ -85,6 +85,18 @@ for (const deviceScaleFactor of [1, 2]) {
       await editor.fill("Draft only, do not start an agent");
       await editor.press("Control+Enter");
       await expect.poll(() => page.evaluate((p) => window.__graphcode.cards(p)![0]!.values.summary, h.alpha)).toBe("Draft only, do not start an agent");
+      await page.mouse.dblclick(rect.x + at.x + 80, rect.y + at.y - 15, { delay: 60 });
+      await expect(editor).toHaveAttribute("data-field", "__title");
+      await expect(editor).toHaveAttribute("aria-label", "Node name");
+      const headerBox = (await editor.boundingBox())!;
+      expect(headerBox.y).toBeLessThan(rect.y + at.y);
+      await editor.fill("Paired comparison");
+      await editor.press("Enter");
+      await expect.poll(() => page.evaluate((p) => window.__graphcode.cards(p)![0]!.title, h.alpha)).toBe("Paired comparison");
+      await page.mouse.dblclick(rect.x + at.x + 80, rect.y + at.y - 15, { delay: 60 });
+      await editor.fill("");
+      await editor.press("Enter");
+      await expect.poll(() => page.evaluate((p) => window.__graphcode.cards(p)![0]!.title, h.alpha)).toBe("");
       expect(receivedGraphCommands(h, "createNode")).toEqual([]);
       expect(h.pageErrors).toEqual([]);
       await page.screenshot({ path: `e2e/out/canvas-${deviceScaleFactor}x.png` });

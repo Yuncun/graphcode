@@ -1,6 +1,6 @@
 import type { LGraphNode } from "@comfyorg/litegraph";
 import type { EdgeCondition, EdgeKind } from "../daemon/protocol.ts";
-import { OUTPUT_SLOTS } from "./LoopCardNode.ts";
+import { LoopCardNode } from "./LoopCardNode.ts";
 
 export interface LinkRequest { from: string; to: string; kind: EdgeKind; condition: EdgeCondition }
 
@@ -15,7 +15,7 @@ export function linkRequestFrom(renderLinks: ReadonlyArray<DraggedLink>, target:
   const link = renderLinks[0];
   if (!link || link.toType !== "input" || typeof link.fromSlotIndex !== "number") return null;
   if (link.node === target) return null;
-  const slot = OUTPUT_SLOTS[link.fromSlotIndex];
+  const slot = link.node instanceof LoopCardNode ? link.node.outputDefinition(link.fromSlotIndex) : undefined;
   if (!slot) return null;
   return { from: String(link.node.id), to: String(target.id), kind: slot.kind, condition: slot.condition };
 }

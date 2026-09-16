@@ -3,7 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { LGraph, LGraphBadge, LiteGraph } from "@comfyorg/litegraph";
-import { CARD_WIDTH, LoopCardNode, onUserLinkDrop, OUTPUT_SLOTS, outputSlotFor, registerLoopCardNode, TITLE_FIELD, type UserLinkDrop } from "../app/canvas/LoopCardNode.ts";
+import { CARD_WIDTH, LoopCardNode, onUserLinkDrop, OUTPUT_SLOTS, registerLoopCardNode, TITLE_FIELD, type UserLinkDrop } from "../app/canvas/LoopCardNode.ts";
 import { FieldWidget } from "../app/canvas/widgets/FieldWidget.ts";
 import type { LoopNode } from "../app/daemon/protocol.ts";
 import { validateNodeType, type NodeTypeDef } from "../app/nodes/registry.ts";
@@ -32,15 +32,51 @@ function card(h: ReturnType<typeof host> = host()): LoopCardNode {
 const live = (extra: Partial<LoopNode> = {}): LoopNode => ({ id: "L1", title: "Build it", loopType: "goalBased", state: { running: {} }, createdAt: 0, pausesBeforeWritesOnly: false, pilotState: "notPiloted", goal: { summary: "Build the feature", predicate: "pnpm test" }, modelTier: "capable", ...extra });
 
 const widgetNames = (c: LoopCardNode) => (c.widgets ?? []).map((w) => w.name);
-const field = (c: LoopCardNode, name: string) => (c.widgets ?? []).find((w): w is FieldWidget => w instanceof FieldWidget && w.name === name)!;
+const field = (c: LoopCardNode, name: string) => name === TITLE_FIELD ? c.titleEditor : (c.widgets ?? []).find((w): w is FieldWidget => w instanceof FieldWidget && w.name === name)!;
 /** litegraph types `badges` as badge-or-thunk; every card sets plain badges. */
 const badgeText = (c: LoopCardNode) => (c.badges[0] as LGraphBadge).text;
 
 describe("a draft card", () => {
-  it("builds a title field, the type's widgets in order, and the status block", () => {
+  it("uses the type's default name when an unnamed composite needs a daemon title", async () => {
+    const def = await load("group/composite");
+    const c = card();
+    c.setup(def, { type: def.type, title: "", values: {} });
+    expect(c.problems()).toEqual([]);
+    expect(c.draft().title).toBe(def.title);
+    expect(c.record().title).toBe("");
+  });
+  it("edits an optional name in the header without a second title field", () => {
+    const h = host();
+    const c = card(h);
+    c.setup(goal, { type: "agent/goal", title: "", values: { summary: "Ship it" } });
+    expect(widgetNames(c)).not.toContain(TITLE_FIELD);
+    expect(c.getTitle()).toBe("Goal loop");
+    expect(c.record().title).toBe("");
+    c.onNodeTitleDblClick();
+    expect(h.onEditField).toHaveBeenCalledWith(c, c.titleEditor);
+    expect(c.titleEditor.boxRect(c)[1]).toBeLessThan(0);
+    c.setFieldValue(c.titleEditor, "  Ship release  ");
+    expect(c.getTitle()).toBe("Ship release");
+    c.setFieldValue(c.titleEditor, "");
+    expect(c.getTitle()).toBe("Goal loop");
+    expect(c.draft().title).toBe("");
+  });
+
+  it("keeps actionable warnings without repeating the draft type and state", () => {
     const c = card();
     c.setup(goal, { type: "agent/goal", title: "", values: {} });
-    expect(widgetNames(c)).toEqual([TITLE_FIELD, "summary", "predicate", "Model", "Backend", "status"]);
+    const status = c.widgets!.find((w) => w.name === "status") as unknown as { warning: string; meta: string; computeLayoutSize(): { minHeight: number } };
+    expect(status.warning).toBe("Goal is required.");
+    expect(status.meta).toBe("");
+    c.setValue("summary", "Ship it");
+    expect(status.computeLayoutSize().minHeight).toBe(0);
+    expect(badgeText(c)).toBe("DRAFT");
+  });
+
+  it("builds the type's body fields and the status block", () => {
+    const c = card();
+    c.setup(goal, { type: "agent/goal", title: "", values: {} });
+    expect(widgetNames(c)).toEqual(["summary", "predicate", "Model", "Backend", "status"]);
     expect(c.cardMode).toBe("draft");
     expect(c.nodeType).toBe("agent/goal");
     expect(c.values).toEqual({ summary: "", predicate: "", model: "standard", backend: "claudeCode" });
@@ -63,7 +99,7 @@ describe("a draft card", () => {
     expect(c.draft()).toMatchObject({ id: String(c.id), title: "", loopType: "goalBased", goal: { summary: "Ship it" } });
   });
 
-  it("takes the title from its field and reports a record and a placement", () => {
+  it("takes the title from its header editor and reports a record and a placement", () => {
     const h = host();
     const c = card(h);
     c.setup(goal, { type: "agent/goal", title: "Old", values: { summary: "x" } });
@@ -159,21 +195,22 @@ describe("a live card", () => {
     expect(c.title).toBe("Build it");
     expect(field(c, TITLE_FIELD).value).toBe("Build it");
     c.setFieldValue(field(c, TITLE_FIELD), "   ");
-    expect(h.onRename).toHaveBeenCalledTimes(1);
+    expect(h.onRename).toHaveBeenLastCalledWith(c, "Goal loop");
+    expect(h.onRename).toHaveBeenCalledTimes(2);
   });
 
   it("draws without fields until its type is known, then with them", () => {
     const c = card();
     c.applyLive(live(), null);
-    expect(widgetNames(c)).toEqual([TITLE_FIELD, "status"]);
+    expect(widgetNames(c)).toEqual(["status"]);
     c.applyLive(live(), goal);
-    expect(widgetNames(c)).toEqual([TITLE_FIELD, "summary", "predicate", "Model", "Backend", "status"]);
+    expect(widgetNames(c)).toEqual(["summary", "predicate", "Model", "Backend", "status"]);
   });
 
   it("flips a draft to live on the daemon's echo, keeping its size", () => {
     const c = card();
     c.setup(goal, { type: "agent/goal", title: "Changelog", values: { summary: "Write it" } });
-    c.setSize([CARD_WIDTH, c.size[1] + 40]);
+    c.setSize([CARD_WIDTH, c.size[1] + 100]);
     const tall = c.size[1];
     c.applyLive(live({ title: "Changelog", goal: { summary: "Write it" } }), goal);
     expect(c.cardMode).toBe("live");
@@ -201,17 +238,26 @@ describe("a live card", () => {
 });
 
 describe("card slots", () => {
+  it("uses the node definition's outputs rather than giving a timed loop success and failure ports", () => {
+    const c = card();
+    c.setup(timed, { type: "agent/timed", title: "", values: {} });
+    expect(c.outputs.map((o) => o.name)).toEqual(["handoff", "message", "spawn"]);
+  });
   it("has one output per edge kind and handoff condition, in a fixed order", () => {
     expect(OUTPUT_SLOTS.map((s) => s.name)).toEqual(["handoff", "on success", "on failure", "message", "spawn"]);
     expect(card().outputs.map((o) => o.name)).toEqual(["handoff", "on success", "on failure", "message", "spawn"]);
   });
 
   it("maps an edge's kind and condition to its output slot", () => {
-    expect(outputSlotFor("handoff", "always")).toBe(0);
-    expect(outputSlotFor("handoff", "onSuccess")).toBe(1);
-    expect(outputSlotFor("handoff", "onFailure")).toBe(2);
-    expect(outputSlotFor("message", "onSuccess")).toBe(3);
-    expect(outputSlotFor("spawn", "onFailure")).toBe(4);
+    const c = card();
+    expect(c.outputSlot("handoff", "always")).toBe(0);
+    expect(c.outputSlot("handoff", "onSuccess")).toBe(1);
+    expect(c.outputSlot("handoff", "onFailure")).toBe(2);
+    expect(c.outputSlot("message", "always")).toBe(3);
+    expect(c.outputSlot("spawn", "always")).toBe(4);
+    expect(c.outputSlot("message", "onSuccess")).toBe(5);
+    expect(c.outputSlot("spawn", "onFailure")).toBe(6);
+    expect(c.outputDefinition(5)).toMatchObject({ kind: "message", condition: "onSuccess" });
   });
 });
 

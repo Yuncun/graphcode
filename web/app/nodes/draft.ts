@@ -40,6 +40,7 @@ export function buildDraft(def: NodeTypeDef, values: WidgetValues, title: string
   }
   // The caller's id and title always win over anything a module's toDraft happens to return.
   const draft: NodeDraft = { pausesBeforeWritesOnly: false, ...partial, id, title: title.trim(), loopType: partial.loopType };
+  if (draft.loopType === "proactive" && !draft.title) draft.title = def.title;
   if (partial.goal) draft.goal = { ...DEFAULT_GOAL, ...stripUndefined(partial.goal) } as GoalSpec;
   return draft;
 }

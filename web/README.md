@@ -76,21 +76,34 @@ prompt is planned.
 ## Editing
 
 The canvas is the document, the way ComfyUI's is. Drag a node type from the Nodes tab onto the
-canvas and it becomes a draft card at once, with its inputs on it: a title, the type's fields (goal or
-prompt, done check, model, backend, …) and a status line. Nothing is sent. Text fields
+canvas and it becomes a draft card at once, with the type's fields (goal or prompt, done check,
+model, backend, …). Double-click its header to name it; Enter saves and Escape cancels.
+The name is optional: clear it to show the node type's name. There is no separate Title row.
+Drafts show a state badge and actionable problems, not a duplicate status description. Nothing is sent. Text fields
 open an editor over themselves (⌘Enter or Enter keeps the text, Escape drops it); model, backend,
 interval and toggles are litegraph's own widgets. Cards drag and resize; position, size, drafts and
 draft wires are saved in `<project>/.graphcode/canvas.json` (version 2). A layout saved by phase 1
 (version 1) is laid out afresh the first time phase 2 opens the project; its positions were made
 for cards a third as tall.
 
-Drag from a card's output slot (handoff, on success, on failure, message, spawn) onto another card to
-draw a wire. Every wire is a draft until Run. **Run** in the toolbar sends `createNode` for every draft
+Drag from a card's output slot onto another card to draw a wire. Ports follow the node type:
+Main and Timed advertise handoff, message and spawn; Goal, Turn and Composite also advertise
+on success and on failure. Saved connections retain their exact kinds and conditions even when a
+node pack does not advertise those ports. One output can feed several cards from the same dot;
+the editor prevents adding the same connection twice. Incoming dots name their source.
+
+Ports are actions and conditions, not states. Handoff waits for a source to finish, with optional
+success/failure conditions; message delivers information without blocking readiness; spawn creates
+a fresh instance of the destination template. Multiple incoming handoffs are **all required**, not
+alternatives. Do not join mutually exclusive success/failure branches into one target.
+
+Every wire is a draft until Run. **Run** in the toolbar sends `createNode` for every draft
 and then `createEdge` for each wire whose ends are live, the way ComfyUI's one Queue runs the whole
 graph; a draft with a problem is named and nothing is sent. A card is "starting" until the daemon
 reports it, then live: its fields turn read-only (the title still renames). There are no buttons on a
 card; Stop and Restart stay in the Swift app and the CLI. A goal loop runs the moment the daemon has
-it; Run is the moment you choose.
+it; Run is the moment you choose. This create-before-connect sequence does not yet guarantee
+dependency ordering for unattended agents; an edited workflow is not an execution-safety guarantee.
 
 The Delete key removes a draft outright and asks before a live card is deleted. Dragging a wire off
 its input removes a draft wire outright and asks before a live edge is deleted. litegraph's context

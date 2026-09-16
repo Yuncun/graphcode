@@ -35,6 +35,7 @@ function slots(raw: unknown, field: "inputs" | "outputs"): SlotDef[] {
     const s = item as Record<string, unknown>;
     if (typeof s?.name !== "string") throw new Error(`${field}[${i}] needs a name`);
     if (!SLOT_TYPES.includes(s.type as EdgeKind)) throw new Error(`${field}[${i}] has unknown slot type "${String(s.type)}"`);
+    if (s.condition !== undefined && s.condition !== "always" && s.condition !== "onSuccess" && s.condition !== "onFailure") throw new Error(`${field}[${i}] has unknown condition "${String(s.condition)}"`);
     return s as unknown as SlotDef;
   });
 }
