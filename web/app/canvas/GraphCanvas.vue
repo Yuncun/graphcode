@@ -50,6 +50,7 @@ const hostEl = ref<HTMLDivElement | null>(null);
 const canvasEl = ref<HTMLCanvasElement | null>(null);
 let canvas: LGraphCanvas | null = null;
 let editor: FieldEditor | null = null;
+let resizeObserver: ResizeObserver | null = null;
 /**
  * One litegraph graph per project path, so switching tabs keeps each project's cards, drafts and
  * viewport. The map holds the in-flight load of the saved layout rather than the finished view,
@@ -173,10 +174,11 @@ function draftLink(request: LinkRequest): void {
 function fit(): void {
   const parent = canvasEl.value?.parentElement;
   if (!canvas || !parent) return;
-  // litegraph's resize() owns the element's width and height: it also resizes the offscreen
-  // background canvas that links and the grid are drawn on, and it does nothing at all when
-  // the element already has the size being asked for.
-  canvas.resize(parent.clientWidth, parent.clientHeight);
+  const { width, height } = parent.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  // Both drawing buffers use physical pixels; graph coordinates and pointer events use CSS pixels.
+  canvas.resize(Math.round(width * ratio), Math.round(height * ratio));
+  canvas.ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   canvas.setDirty(true, true);
 }
 
@@ -283,6 +285,8 @@ onMounted(async () => {
     changed();
   });
   fit();
+  resizeObserver = new ResizeObserver(fit);
+  resizeObserver.observe(hostElement);
   window.addEventListener("resize", fit);
   await show(props.graph);
 });
@@ -327,6 +331,7 @@ defineExpose({
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", fit);
+  resizeObserver?.disconnect();
   onUserLinkDrop(null);
   editor?.close(false);
   canvas?.stopRendering();

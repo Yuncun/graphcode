@@ -125,3 +125,8 @@ export function graphCommand(projectPath: string, command: GraphCommand): Daemon
 export function stateName(node: LoopNode): LoopStateName {
   return (Object.keys(node.state)[0] ?? "idle") as LoopStateName;
 }
+
+/** The web bridge reads node packs and canvas files from local macOS folders. */
+export function isLocalProjectPath(path: string): boolean {
+  return path.startsWith("/");
+}

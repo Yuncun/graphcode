@@ -94,7 +94,42 @@ test.describe("phase 0 surface", () => {
     await page.getByTestId("tab-add").click();
     await expect(page.getByTestId("status")).toContainText("no project at /nonexistent/project");
     await expect(page.getByTestId("tab")).toHaveCount(2);
+    await expect(page.getByTestId("tab-name").first()).toHaveAttribute("aria-current", "true");
+    await expect(page.locator("canvas")).toBeVisible();
     await shot(page, "P0-06-open-rejected");
+  });
+
+  test("remote projects do not break local startup or send local file requests", async ({ page }) => {
+    h = await launch();
+    const remote = "codespace://example/workspaces/project";
+    const daemon = h.daemon!;
+    const graph = alphaGraph(remote);
+    graph.project.name = "Remote project";
+    daemon.graphs.set(remote, graph);
+    daemon.open.clear();
+    daemon.open.add(remote);
+    daemon.open.add(h.alpha);
+    const remoteRequests: string[] = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).searchParams.get("project") === remote) remoteRequests.push(request.url());
+    });
+    await openApp(page, h);
+    await expect(page.getByTestId("node-type")).toHaveCount(5);
+    await expect(page.getByTestId("tab-name")).toHaveCount(1);
+    await expect(page.getByTestId("tab-name")).toHaveText("alpha");
+    await expect(page.getByTestId("status")).not.toContainText("HTTP 400");
+    expect(remoteRequests).toEqual([]);
+    expect(receivedCommands(h, "closeProject")).toEqual([]);
+    expect(h.pageErrors).toEqual([]);
+
+    daemon.send({ recentProjectsListed: { _0: [graph.project, { path: h.alpha, name: "alpha" }] } });
+    await page.getByTestId("sidebar-tab-projects").click();
+    await expect(page.getByTestId("recent-project").filter({ hasText: "Remote project" })).toBeDisabled();
+    await expect(page.getByTestId("recent-project").filter({ hasText: "alpha" })).toBeEnabled();
+    await page.evaluate((p) => window.__graphcode.openProject(p), remote);
+    await expect(page.getByTestId("status")).toContainText("local folders only");
+    expect(receivedCommands(h, "openProject")).toEqual([]);
+    await expect(page.getByTestId("tab-name")).toHaveAttribute("aria-current", "true");
   });
 
   test("P0-07 dragging a card persists its position across a reload", async ({ page }) => {
