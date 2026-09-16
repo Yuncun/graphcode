@@ -65,7 +65,7 @@ test("plus opens an autosaved workflow without a folder; reload and close preser
   await page.screenshot({ path: "e2e/out/workflow-document.png" });
 });
 
-test("a folder is attached before Run without importing unrelated project agents", async ({ page }) => {
+test("Run on a folder-free workflow asks for a folder, then runs with that folder's packs, without importing unrelated project agents", async ({ page }) => {
   h = await launch({ before: ({ alpha }) => {
     const nodes = path.join(alpha, ".graphcode", "nodes", "agent");
     fs.mkdirSync(nodes, { recursive: true });
@@ -83,9 +83,7 @@ export default { ...base, title: "Folder goal", toDraft(values) {
   page.once("dialog", (dialog) => dialog.accept(`${alias}/`));
   await page.getByTestId("run").click();
   await expect.poll(() => page.getByTestId("run").getAttribute("title")).toContain(h.alpha);
-  expect(receivedGraphCommands(h, "createNode")).toEqual([]);
-  await expect.poll(() => page.evaluate((p) => window.__graphcode.cards(p)?.length, key)).toBe(1);
-  await page.getByTestId("run").click();
+  // One press: the folder is attached, its pack loads, and the same Run goes on to create the node.
   await expect.poll(() => receivedGraphCommands(h, "createNode").length).toBe(1);
   expect(receivedGraphCommands(h, "createNode")[0]!.createNode._0.goal.summary).toBe("folder: Review the proposed change");
   await expect.poll(() => page.evaluate((p) => window.__graphcode.cards(p)?.[0]?.mode, key)).toBe("live");

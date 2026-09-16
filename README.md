@@ -15,4 +15,4 @@ cd web && mise exec -- pnpm build && cd ..
 make web-serve
 ```
 
-Then open http://localhost:4747 and pick a project.
+Then open http://localhost:4747. Press **+** for a new workflow, or open a project folder from the Projects tab.

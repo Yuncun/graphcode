@@ -289,8 +289,9 @@ workflow tab to rename it. Closing the tab finishes its save without deleting th
 sending `closeProject`. The Workflows panel lists these documents separately from reusable templates.
 Existing project canvases and their project-local layout files remain available through Projects.
 
-An unbound workflow can be edited while the daemon is offline. Its first Run attaches a folder only
-after daemon confirmation; a second Run uses that folder's loaded node definitions. Its own node IDs
+An unbound workflow can be edited while the daemon is offline. Its first Run asks for a folder, waits for
+the daemon to confirm it, loads that folder's node definitions, and then continues as one Run
+(revised 2026-09-15; it was two presses). Its own node IDs
 are saved before commands are sent and filter the daemon overlay, so sharing a folder does not mix
 unrelated agents into the document. Bound workflows wait for unavailable projects rather than
 recreating their live agents as drafts.
