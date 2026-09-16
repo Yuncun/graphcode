@@ -3,17 +3,22 @@ import type { ProjectRef } from "../daemon/protocol.ts";
 import { isLocalProjectPath } from "../daemon/protocol.ts";
 defineProps<{ recent: ProjectRef[] }>();
 const emit = defineEmits<{ open: [path: string] }>();
+function openFolder() {
+  const path = window.prompt("Absolute path of the project folder to open")?.trim();
+  if (path) emit("open", path);
+}
 </script>
 
 <template>
   <div class="projects-panel">
+    <button class="recent" data-testid="open-project" @click="openFolder">Open folder…</button>
     <h3>Recent projects</h3>
     <p class="hint">The web canvas supports local folders. Use the Mac app for remote projects.</p>
     <button v-for="p in recent" :key="p.path" class="recent" data-testid="recent-project" :title="p.path" :disabled="!isLocalProjectPath(p.path)" @click="emit('open', p.path)">
       <span class="title">{{ p.name }}</span>
       <small>{{ p.path }}</small>
     </button>
-    <p v-if="!recent.length" class="hint">The daemon has no recent projects. Use + in the tab strip to open a folder.</p>
+    <p v-if="!recent.length" class="hint">The daemon has no recent projects. Open a folder here, or use + for a folder-free workflow.</p>
   </div>
 </template>
 

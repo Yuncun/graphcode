@@ -19,7 +19,9 @@ If a package mirror lacks versions in the lockfile, a local prototype can use
 `node server/main.ts`. This resolves compatible versions without changing the committed lockfile;
 it is not a reproducible locked install. Do not commit mirror-specific download URLs.
 
-The web canvas opens local folders only. Remote projects restored by the daemon stay open in the
+**+ creates a blank, autosaved workflow without choosing a folder.** Authoring and copy/paste work
+without the daemon. Open existing project canvases from **Projects → Open folder…** or Recent projects.
+Project folders are local only. Remote projects restored by the daemon stay open in the
 Mac app but are not canvas tabs; their Recent projects entries are disabled. A rejected folder
 open leaves the current canvas in place.
 
@@ -49,6 +51,8 @@ phase 2 did not replace (the inspector and the create-on-drop flow are gone, so 
 - `server/` bridge: websocket relay of the daemon's own JSON frames, `/api/canvas` for positions, static files
 - `app/` Vue app: `daemon/` (types, connection, store), `canvas/` (litegraph adapter, card node, placement), `tabs/`
 - Positions live in `<project>/.graphcode/canvas.json`
+- Folder-free documents live in `~/.graphcode/documents/<UUID>.json`; names and optional folders are
+  metadata, not file paths. The browser remembers its open workflow tabs.
 
 ## Node packs
 
@@ -82,7 +86,8 @@ The name is optional: clear it to show the node type's name. There is no separat
 Drafts show a state badge and actionable problems, not a duplicate status description. Nothing is sent. Text fields
 open an editor over themselves (⌘Enter or Enter keeps the text, Escape drops it); model, backend,
 interval and toggles are litegraph's own widgets. Cards drag and resize; position, size, drafts and
-draft wires are saved in `<project>/.graphcode/canvas.json` (version 2). A layout saved by phase 1
+draft wires are autosaved in the workflow document, or `<project>/.graphcode/canvas.json` for a
+project canvas (version 2). A layout saved by phase 1
 (version 1) is laid out afresh the first time phase 2 opens the project; its positions were made
 for cards a third as tall.
 
@@ -115,11 +120,26 @@ Ctrl+wheel zooms. These gestures use LiteGraph's standard navigation mode.
 
 ## Workflows
 
+The **+** tab button creates an independent document. Double-click its tab name to rename it.
+Closing a workflow tab finishes its pending save; it does not delete the document or stop agents.
+Reopen it under **Workflows → Autosaved workflows**. Existing project canvases remain available.
+
+For an unbound workflow, the first **Run** asks for a local folder and waits for the daemon to confirm
+it. Folder aliases and trailing slashes resolve to the daemon's canonical path. Review the folder's
+loaded node definitions, then press **Run** again to start. A folder's
+custom packs can change a draft's fields and behavior; unavailable types block execution.
+The workflow saves its node identities before sending any commands and shows only its own agents,
+not unrelated agents in the same folder. A bound workflow waits for its project to be available;
+it does not turn unavailable running agents into new drafts.
+
+Canvas writes are ordered and files replaced atomically. Metadata edits preserve concurrent canvas
+saves. Invalid or unreadable documents produce errors instead of silently becoming empty workflows.
+
 **Copy** or Cmd/Ctrl+C copies selected cards and only the wires between them as GraphCode workflow
 JSON on the system clipboard. **Paste** or Cmd/Ctrl+V inserts fresh draft cards near the last canvas
 pointer position and selects them. Names, custom values, sizes, relative positions, and exact wire
 kinds and conditions are preserved. Live cards are copied as draft definitions; originals are never
-started, renamed, or deleted. Copy/paste works between project tabs, browser tabs, and workflow JSON
+started, renamed, or deleted. Copy/paste works between workflow/project tabs, browser tabs, and workflow JSON
 in a text editor. Text fields keep their normal text selection and clipboard shortcuts.
 
 The whole paste is refused if the JSON is malformed or a node type is unavailable. Browser clipboard
@@ -127,8 +147,11 @@ permission errors appear in the footer, without falling back to an older copy. A
 paste is cancelled if the active project tab changes before the clipboard read completes.
 
 **Save workflow…** writes every card (live ones through the type's `fromLoop`) and every wire to
-`~/.graphcode/workflows/<name>.json`. The Workflows tab lists those files; clicking one loads it onto
-the current project as drafts with fresh ids, to the right of what is there. Like paste, loading
+`~/.graphcode/workflows/<name>.json`. **Reusable templates** lists those files; clicking one loads it onto
+the current canvas as drafts with fresh ids, or creates a folder-free document if no canvas is open.
+Like paste, loading
 refuses malformed files or unavailable node types before adding any cards. Recent projects are on
 the Projects tab. `e2e/clipboard-selection.spec.ts` covers selection, clipboard transfers, permissions,
 text-field isolation, and navigation against temporary projects and the scripted daemon.
+`e2e/workflow-documents.spec.ts` covers folder-free authoring, autosave, reopening, copying between
+workflow tabs, deferred folder attachment and isolation from unrelated project agents.

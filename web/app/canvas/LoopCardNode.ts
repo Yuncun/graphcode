@@ -368,7 +368,7 @@ export class LoopCardNode extends LGraphNode {
 
   /** What the daemon would refuse, worded for the status line; empty when Run may send this draft. */
   problems(): string[] {
-    if (!this.def) return ["This card has no node type."];
+    if (!this.def) return [this.nodeType ? `Node type ${this.nodeType} is not loaded.` : "This card has no node type."];
     // A blank required field is one problem, not two: the daemon's own rule for it is not asked until it is filled.
     const missing = missingRequired(this.def.widgets, this.values).map((w) => `${w.label ?? w.name} is required.`);
     if (missing.length) return missing;

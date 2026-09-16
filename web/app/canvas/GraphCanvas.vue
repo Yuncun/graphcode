@@ -35,7 +35,7 @@ const SAVE_DELAY_MS = 500;
  */
 const VIEW_MARGIN: [number, number] = [24, LiteGraph.NODE_TITLE_HEIGHT + 24];
 
-const props = defineProps<{ graph: LoopGraph; nodeTypes: NodeTypeEntry[] }>();
+const props = defineProps<{ graph: LoopGraph; nodeTypes: NodeTypeEntry[]; typesLoading?: boolean }>();
 const emit = defineEmits<{
   select: [id: string | null];
   rename: [id: string, title: string];
@@ -61,7 +61,7 @@ const views = new Map<string, Promise<ProjectView>>();
 /** Views whose layout has loaded; the exposed methods read from here because they cannot await. */
 const resolved = new Map<string, ProjectView>();
 /** Debounced per project, so a move in one project cannot cancel another's pending write. */
-const saves = createSaveScheduler({ delayMs: SAVE_DELAY_MS, save });
+const saves = createSaveScheduler({ delayMs: SAVE_DELAY_MS, save: async (project) => { await save(project); } });
 /** Counts show() calls, so a slow one cannot put its project back on screen after a newer one. */
 let shows = 0;
 /** The view whose graph the canvas is drawing. */
@@ -82,7 +82,6 @@ function viewFor(project: string): Promise<ProjectView> {
   if (!view) {
     view = getLayout(project).then((layout) => {
       const adapter = new GraphAdapter(new LGraph(), host);
-      adapter.types = props.nodeTypes;
       return { project, adapter, layout, viewport: null };
     });
     views.set(project, view);
@@ -195,7 +194,7 @@ async function pasteClipboard(): Promise<void> {
 async function show(graph: LoopGraph): Promise<void> {
   const token = ++shows;
   const view = await viewFor(graph.project.path);
-  view.adapter.types = props.nodeTypes;
+  if (!props.typesLoading) view.adapter.types = props.nodeTypes;
   const changed = view.adapter.sync(graph, view.layout);
   if (token !== shows || !canvas) return;
   if (canvas.graph !== view.adapter.lgraph) {
@@ -218,14 +217,16 @@ async function show(graph: LoopGraph): Promise<void> {
   emit("documentChanged", counts(view));
 }
 
-async function save(project: string): Promise<void> {
-  const view = await views.get(project);
-  if (!view) return;
-  view.layout = view.adapter.document();
+async function save(project: string): Promise<boolean> {
   try {
+    const view = await views.get(project);
+    if (!view) return true;
+    view.layout = view.adapter.document();
     await putLayout(project, view.layout);
+    return true;
   } catch (error) {
     emit("problem", `the canvas could not be saved: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
   }
 }
 
@@ -400,18 +401,21 @@ watch(() => props.graph, (graph, previous) => {
   void show(graph);
 }, { deep: true });
 
-// A project's cards are drawn from its node types; when a pack loads or reloads, every view learns it.
-watch(() => props.nodeTypes, (types) => {
-  for (const view of resolved.values()) view.adapter.types = types;
+// Inactive canvases retain their own project's definitions until that project is shown again.
+watch(() => [props.nodeTypes, props.typesLoading], () => {
   void show(props.graph);
 });
 
 defineExpose({
+  ready: (project: string) => viewFor(project),
   selectAll,
   copySelection,
   pasteClipboard,
   /** App.vue closes a project that is not the one on screen without the watch above ever firing, so it calls this. */
-  flushSave: (project: string) => saves.flush(project),
+  flushSave: (project: string) => {
+    saves.clear(project);
+    return save(project);
+  },
   positions: (project: string) => resolved.get(project)?.adapter.document().nodes,
   viewport: () => canvas ? { scale: canvas.ds.scale, offset: [canvas.ds.offset[0], canvas.ds.offset[1]] as [number, number], width: canvas.canvas.width, height: canvas.canvas.height } : undefined,
   adapter: (project: string) => resolved.get(project)?.adapter,

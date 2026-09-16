@@ -278,3 +278,24 @@ precedence, so a user pack that overrides `agent/goal` draws every live goal loo
 
 Not in phase 2: litegraph's context menus and search box (still off), collapse and colour, a minimap,
 and the engine changes (edges gating start, a done state, reopening a resolved loop).
+
+## 12. Independent workflow documents
+
+The + tab button creates an autosaved blank workflow. A workflow's logical identity is
+`workflow:<UUID>`, not a project directory. Its name, optional folder and version-2 canvas live in
+`~/.graphcode/documents/<UUID>.json`; the browser retains its open-document tabs. Double-click a
+workflow tab to rename it. Closing the tab finishes its save without deleting the document or
+sending `closeProject`. The Workflows panel lists these documents separately from reusable templates.
+Existing project canvases and their project-local layout files remain available through Projects.
+
+An unbound workflow can be edited while the daemon is offline. Its first Run attaches a folder only
+after daemon confirmation; a second Run uses that folder's loaded node definitions. Its own node IDs
+are saved before commands are sent and filter the daemon overlay, so sharing a folder does not mix
+unrelated agents into the document. Bound workflows wait for unavailable projects rather than
+recreating their live agents as drafts.
+
+The document API validates content, serializes per-document writes, and atomically replaces files.
+Metadata patches cannot overwrite a concurrent canvas save. Unknown node definitions survive on
+disk and can be restored when their pack becomes available; missing definitions block Run or
+complete-workflow export. These authoring changes do not fix the engine's create-before-connect
+scheduling limitation.

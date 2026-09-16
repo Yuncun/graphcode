@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { createStore } from "./daemon/store.ts";
 import { DaemonConnection, type ConnectionStatus } from "./daemon/connection.ts";
 import type { DaemonCommand } from "./daemon/protocol.ts";
@@ -8,6 +8,11 @@ import { loadNodeTypes, type NodeTypeEntry } from "./nodes/registry.ts";
 import { planStart } from "./nodes/start.ts";
 import { getWorkflow, listWorkflows, putWorkflow, type WorkflowListing } from "./canvas/workflowClient.ts";
 import { WORKFLOW_NAME } from "../shared/workflowName.ts";
+import { emptyCanvasDoc } from "./canvas/document.ts";
+import { putLayout } from "./canvas/layoutClient.ts";
+import { getWorkflowDocument, listWorkflowDocuments, patchWorkflowDocument, putWorkflowDocument, resolveProjectPath } from "./canvas/documentClient.ts";
+import { graphForDocument } from "./canvas/documentGraph.ts";
+import { DOCUMENT_ID, documentID, documentKey, type DocumentListing, type WorkflowDocument } from "../shared/workflowDocument.ts";
 import GraphCanvas, { type DocumentCounts } from "./canvas/GraphCanvas.vue";
 import ProjectTabs from "./tabs/ProjectTabs.vue";
 import Sidebar from "./sidebar/Sidebar.vue";
@@ -21,10 +26,31 @@ const START_TIMEOUT_MS = 10_000;
 let startTimeoutMs = START_TIMEOUT_MS;
 
 const store = createStore();
+const DOCUMENT_TABS_KEY = "graphcode.workflow-tabs.v1";
+function savedDocumentTabs(): { open: string[]; active: string | null } {
+  try {
+    const text = localStorage.getItem(DOCUMENT_TABS_KEY);
+    if (!text) return { open: [], active: null };
+    const value: unknown = JSON.parse(text);
+    if (!value || typeof value !== "object" || !("open" in value) || !Array.isArray(value.open)) throw new Error("invalid saved workflow tabs");
+    const open = value.open.filter((id): id is string => typeof id === "string" && DOCUMENT_ID.test(id));
+    const key = "active" in value && typeof value.active === "string" ? value.active : null;
+    return { open, active: key && open.some((id) => documentKey(id) === key) ? key : null };
+  } catch (error) {
+    store.pushError(`workflow tabs could not be restored: ${error instanceof Error ? error.message : String(error)}`);
+    return { open: [], active: null };
+  }
+}
+const savedTabs = savedDocumentTabs();
+const documents = ref(new Map<string, WorkflowDocument>());
+const documentListings = ref<DocumentListing[]>([]);
+const openDocuments = ref(savedTabs.open);
+const bindingDocument = ref<{ id: string; project: string; saving: boolean } | null>(null);
+const savingRun = ref(false);
 /** Holds the canvas so a project being closed can have its pending layout save written first. */
 const canvasView = ref<InstanceType<typeof GraphCanvas> | null>(null);
 const status = ref<ConnectionStatus>("connecting");
-const active = ref<string | null>(null);
+const active = ref<string | null>(savedTabs.active);
 let openingProject: string | null = null;
 const selected = ref<string | null>(null);
 const connection = new DaemonConnection(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
@@ -61,7 +87,12 @@ connection.onEvent((event) => {
     active.value = openingProject;
     openingProject = null;
   }
-  if ("errorOccurred" in event) openingProject = null;
+  if ("graphChanged" in event && bindingDocument.value?.project === event.graphChanged._0.project.path && !bindingDocument.value.saving) {
+    const binding = bindingDocument.value;
+    binding.saving = true;
+    void finishBinding(binding.id, binding.project);
+  }
+  if ("errorOccurred" in event) { openingProject = null; bindingDocument.value = null; }
   if (!active.value) active.value = localPaths.value[0] ?? null;
   // The daemon's error names neither the draft it refused nor the project, so every project with a
   // start in flight takes its starting cards back (plan ruling 8).
@@ -72,16 +103,113 @@ connection.onStatus((s) => {
   if (s === "open") {
     send({ restoreOpenProjects: {} });
     send({ listRecentProjects: {} });
+    for (const id of openDocuments.value) {
+      const project = documents.value.get(id)?.project;
+      if (project && !store.projects.has(project)) send({ openProject: { path: project } });
+    }
   }
 });
 
-const names = computed(() => Object.fromEntries(store.order.map((p) => [p, store.projects.get(p)?.project.name ?? p])));
+const names = computed(() => Object.fromEntries([
+  ...store.order.map((p) => [p, store.projects.get(p)?.project.name ?? p]),
+  ...openDocuments.value.map((id) => [documentKey(id), documents.value.get(id)?.name ?? "Loading workflow"]),
+]));
 const localPaths = computed(() => store.order.filter(isLocalProjectPath));
-const activeGraph = computed(() => (active.value ? store.projects.get(active.value) ?? null : null));
+const tabPaths = computed(() => [...localPaths.value, ...openDocuments.value.map(documentKey)]);
+const activeDocument = computed(() => {
+  const id = active.value && documentID(active.value);
+  return id ? documents.value.get(id) ?? null : null;
+});
+const activeGraph = computed(() => {
+  if (activeDocument.value) {
+    const doc = activeDocument.value;
+    return graphForDocument(doc, doc.project ? store.projects.get(doc.project) ?? null : null);
+  }
+  return active.value ? store.projects.get(active.value) ?? null : null;
+});
 /** Only a daemon-confirmed project may supply local node packs. */
-const confirmedProject = computed(() => activeGraph.value?.project.path ?? null);
+const confirmedProject = computed(() => activeDocument.value ? activeDocument.value.project && store.projects.has(activeDocument.value.project) ? activeDocument.value.project : null : activeGraph.value?.project.path ?? null);
 const lastError = computed(() => store.errors[store.errors.length - 1] ?? "");
 const startable = computed(() => counts.value.drafts + counts.value.wires > 0);
+const executionProject = (key: string): string | null => {
+  const id = documentID(key);
+  return id ? documents.value.get(id)?.project ?? null : key;
+};
+
+watch([openDocuments, active], () => {
+  try { localStorage.setItem(DOCUMENT_TABS_KEY, JSON.stringify({ open: openDocuments.value, active: active.value })); }
+  catch (error) { store.pushError(`workflow tabs could not be saved: ${problemText(error)}`); }
+}, { deep: true });
+
+async function refreshDocuments() {
+  try { documentListings.value = await listWorkflowDocuments(); }
+  catch (error) { store.pushError(problemText(error)); }
+}
+
+async function newWorkflow(name?: string) {
+  const number = documentListings.value.filter((doc) => doc.name.startsWith("Untitled workflow")).length + 1;
+  const doc: WorkflowDocument = { version: 1, id: crypto.randomUUID(), name: name ?? `Untitled workflow${number > 1 ? ` ${number}` : ""}`, project: null, canvas: emptyCanvasDoc() };
+  try {
+    await putWorkflowDocument(doc);
+    documents.value.set(doc.id, doc);
+    openDocuments.value.push(doc.id);
+    active.value = documentKey(doc.id);
+    await refreshDocuments();
+  } catch (error) { store.pushError(problemText(error)); }
+}
+
+async function openDocument(id: string, focus = true) {
+  try {
+    const doc = await getWorkflowDocument(id);
+    documents.value.set(id, doc);
+    if (!openDocuments.value.includes(id)) openDocuments.value.push(id);
+    if (focus) active.value = documentKey(id);
+    if (doc.project && !store.projects.has(doc.project) && status.value === "open") send({ openProject: { path: doc.project } });
+  } catch (error) {
+    store.pushError(problemText(error));
+    openDocuments.value = openDocuments.value.filter((item) => item !== id);
+    if (active.value === documentKey(id)) active.value = localPaths.value[0] ?? null;
+  }
+}
+
+async function closeTab(key: string) {
+  const id = documentID(key);
+  if (!id) { closeProject(key); return; }
+  if (await canvasView.value?.flushSave(key) === false) return;
+  openDocuments.value = openDocuments.value.filter((item) => item !== id);
+  if (active.value === key) active.value = openDocuments.value.length ? documentKey(openDocuments.value[0]!) : localPaths.value[0] ?? null;
+}
+
+async function renameDocument(key: string) {
+  const id = documentID(key);
+  const doc = id && documents.value.get(id);
+  if (!doc) return;
+  const name = window.prompt("Workflow name", doc.name)?.trim();
+  if (!name) return;
+  try {
+    if (await canvasView.value?.flushSave(key) === false) return;
+    await patchWorkflowDocument(doc.id, { name });
+    doc.name = name;
+    await refreshDocuments();
+  } catch (error) { store.pushError(problemText(error)); }
+}
+
+async function finishBinding(id: string, project: string) {
+  const doc = documents.value.get(id);
+  if (!doc) return;
+  const key = documentKey(id);
+  try {
+    const adapter = adapterFor(key);
+    if (adapter) {
+      doc.canvas = adapter.document();
+      await putLayout(key, doc.canvas);
+    }
+    await patchWorkflowDocument(id, { project });
+    doc.project = project;
+    await refreshDocuments();
+  } catch (error) { store.pushError(`folder could not be attached: ${problemText(error)}`); }
+  finally { if (bindingDocument.value?.id === id) bindingDocument.value = null; }
+}
 
 /** Drop the tab only once the daemon has been told, so the view cannot disagree with the daemon. */
 function closeProject(path: string) {
@@ -93,13 +221,16 @@ function closeProject(path: string) {
   store.order = store.order.filter((p) => p !== path);
   if (active.value === path) active.value = localPaths.value[0] ?? null;
 }
-function openProject(path: string) {
+async function openProject(path: string) {
   if (!isLocalProjectPath(path)) {
     store.pushError("The web canvas supports local folders only. Open remote projects in the Mac app.");
     return;
   }
-  if (!send({ openProject: { path } })) return;
-  openingProject = path;
+  try {
+    const canonical = await resolveProjectPath(path);
+    if (!send({ openProject: { path: canonical } })) return;
+    openingProject = canonical;
+  } catch (error) { store.pushError(problemText(error)); }
 }
 
 async function reloadNodeTypes() {
@@ -110,7 +241,10 @@ async function reloadNodeTypes() {
     const entries = await loadNodeTypes(project);
     if (load === nodeTypeLoads) nodeTypes.value = entries;
   } catch (error) {
-    if (load === nodeTypeLoads) store.pushError(error instanceof Error ? error.message : String(error));
+    if (load === nodeTypeLoads) {
+      nodeTypes.value = [];
+      store.pushError(error instanceof Error ? error.message : String(error));
+    }
   } finally {
     if (load === nodeTypeLoads) nodeTypesLoading.value = false;
   }
@@ -127,23 +261,59 @@ const problemText = (error: unknown) => (error instanceof Error ? error.message 
  * createEdge for each wire whose two ends are ready (plan ruling 2). The cards wait as "starting"
  * for the daemon's echo.
  */
-function startCards() {
-  const project = active.value;
-  const adapter = adapterFor(project);
-  if (!project || !adapter) return;
+async function startCards() {
+  const key = active.value;
+  const adapter = adapterFor(key);
+  if (!key || !adapter || savingRun.value || bindingDocument.value || nodeTypesLoading.value) return;
+  const doc = activeDocument.value;
+  const project = executionProject(key);
   const cards = adapter.cards().map((c) => ({ id: String(c.id), mode: c.cardMode, title: c.title, problems: c.cardMode === "draft" ? c.problems() : [], draft: () => c.draft() }));
   const plan = planStart(cards, adapter.draftEdges());
   for (const s of plan.skipped) store.pushError(`"${s.title || "Untitled"}" was not started: ${s.problem}`);
   if (!plan.creates.length && !plan.edges.length) return;
-  for (const c of plan.creates) if (!send(graphCommand(project, { createNode: { _0: c.draft } }))) return;
-  for (const e of plan.edges) if (!send(graphCommand(project, { createEdge: { from: e.from, to: e.to, spec: edgeSpec(e.kind, e.condition) } }))) return;
+  if (doc && !project) {
+    if (status.value !== "open") { store.pushError("Connect to graphcoded before choosing a folder and running this workflow."); return; }
+    const folder = window.prompt("Choose an absolute project folder for this workflow. No agents start until you press Run again.")?.trim();
+    if (!folder) return;
+    if (!isLocalProjectPath(folder)) { store.pushError("Choose an absolute local project folder."); return; }
+    savingRun.value = true;
+    try {
+      const canonical = await resolveProjectPath(folder);
+      bindingDocument.value = { id: doc.id, project: canonical, saving: false };
+      if (!send({ openProject: { path: canonical } })) bindingDocument.value = null;
+    } catch (error) { store.pushError(problemText(error)); }
+    finally { savingRun.value = false; }
+    return;
+  }
+  if (!project) return;
+  const createdIDs = plan.creates.map((card) => card.id);
+  if (doc) {
+    savingRun.value = true;
+    adapter.markStarting(createdIDs);
+    doc.canvas = adapter.document();
+    try { await putLayout(key, doc.canvas); }
+    catch (error) {
+      adapter.revertStarting(createdIDs);
+      canvasView.value?.touch(key);
+      store.pushError(`workflow must be saved before Run: ${problemText(error)}`);
+      return;
+    } finally { savingRun.value = false; }
+  }
+  const sendRun = (command: DaemonCommand) => {
+    if (send(command)) return true;
+    adapter.revertStarting(createdIDs);
+    canvasView.value?.touch(key);
+    return false;
+  };
+  for (const c of plan.creates) if (!sendRun(graphCommand(project, { createNode: { _0: c.draft } }))) return;
+  for (const e of plan.edges) if (!sendRun(graphCommand(project, { createEdge: { from: e.from, to: e.to, spec: edgeSpec(e.kind, e.condition) } }))) return;
   if (plan.creates.length) {
     adapter.markStarting(plan.creates.map((c) => c.id));
-    const armed = startTimers.get(project);
+    const armed = startTimers.get(key);
     if (armed) clearTimeout(armed);
-    startTimers.set(project, setTimeout(() => revertStarting(project, `the daemon did not report the new loop within ${startTimeoutMs / 1000} s`), startTimeoutMs));
+    startTimers.set(key, setTimeout(() => revertStarting(key, `the daemon did not report the new loop within ${startTimeoutMs / 1000} s`), startTimeoutMs));
   }
-  canvasView.value?.touch(project);
+  canvasView.value?.touch(key);
 }
 
 /** One project's starting cards go back to draft: the daemon said no, or said nothing for too long. */
@@ -155,7 +325,7 @@ function revertStarting(project: string, why: string) {
   if (!adapter) return;
   // The store holds what the daemon reported even for a project not on screen; a card it has is
   // live the next time that project is shown, so only the cards it does not have go back to draft.
-  const reported = new Set((store.projects.get(project)?.nodes ?? []).map((n) => n.id));
+  const reported = new Set((store.projects.get(executionProject(project) ?? "")?.nodes ?? []).map((n) => n.id));
   const stale = adapter.cards().filter((c) => c.cardMode === "starting" && !reported.has(String(c.id))).map((c) => String(c.id));
   const reverted = stale.length ? adapter.revertStarting(stale) : [];
   if (!reverted.length) return;
@@ -164,11 +334,12 @@ function revertStarting(project: string, why: string) {
 }
 
 function onRename(id: string, title: string) {
-  if (active.value) send(graphCommand(active.value, { renameNode: { _0: id, title } }));
+  const project = active.value && executionProject(active.value);
+  if (project) send(graphCommand(project, { renameNode: { _0: id, title } }));
 }
 /** The Delete key on live cards: they are the daemon's, so ask once, then send deleteNode for each. */
 function onDeleteLive(ids: string[]) {
-  const project = active.value;
+  const project = active.value && executionProject(active.value);
   const graph = activeGraph.value;
   if (!project || !graph || !ids.length) return;
   const title = graph.nodes.find((n) => n.id === ids[0])?.title ?? ids[0];
@@ -179,9 +350,10 @@ function onDeleteLive(ids: string[]) {
   for (const id of ids) send(graphCommand(project, { deleteNode: { _0: id } }));
 }
 function onDeleteEdge(edgeID: string) {
-  if (!active.value) return;
+  const project = active.value && executionProject(active.value);
+  if (!project) return;
   if (!window.confirm("Delete this edge? It cannot be undone.")) return;
-  send(graphCommand(active.value, { deleteEdge: { _0: edgeID } }));
+  send(graphCommand(project, { deleteEdge: { _0: edgeID } }));
 }
 
 async function refreshWorkflows() {
@@ -209,11 +381,15 @@ async function saveWorkflow() {
   }
 }
 async function loadWorkflow(name: string) {
-  const project = active.value;
-  const adapter = adapterFor(project);
-  if (!project || !adapter) return;
   try {
     const file = await getWorkflow(name);
+    if (!activeGraph.value) await newWorkflow(file.name);
+    const project = active.value;
+    if (!project) return;
+    await nextTick();
+    await canvasView.value?.ready(project);
+    const adapter = adapterFor(project);
+    if (!adapter) throw new Error("The canvas is not ready.");
     adapter.loadWorkflow(file);
     canvasView.value?.touch(project);
   } catch (error) {
@@ -241,21 +417,23 @@ onMounted(() => {
   };
   connection.open();
   void refreshWorkflows();
+  void refreshDocuments();
+  for (const id of savedTabs.open) void openDocument(id, false);
 });
 </script>
 
 <template>
   <main class="shell">
-    <ProjectTabs :paths="localPaths" :names="names" :active="active" @select="active = $event" @close="closeProject" @open="openProject" />
+    <ProjectTabs :paths="tabPaths" :names="names" :active="active" @select="active = $event" @close="closeTab" @new="newWorkflow()" @rename="renameDocument" />
     <div class="body">
       <Sidebar>
         <template #nodes><NodesPanel :entries="nodeTypes" :loading="nodeTypesLoading" @reload="reloadNodeTypes" /></template>
-        <template #workflows><WorkflowsPanel :workflows="workflows" :loading="workflowsLoading" :can-save="!!activeGraph" @save="saveWorkflow" @load="loadWorkflow" @reload="refreshWorkflows" /></template>
+        <template #workflows><WorkflowsPanel :workflows="workflows" :documents="documentListings" :loading="workflowsLoading" :can-save="!!activeGraph" @save="saveWorkflow" @load="loadWorkflow" @open-document="openDocument" @reload="refreshWorkflows(); refreshDocuments()" /></template>
         <template #projects><ProjectsPanel :recent="store.recent" @open="openProject" /></template>
       </Sidebar>
       <section class="center">
         <div v-if="activeGraph" class="toolbar" data-testid="toolbar">
-          <button class="primary" data-testid="run" :disabled="!startable" :title="`${counts.drafts} draft card(s) and ${counts.wires} draft wire(s)`" @click="startCards()">
+          <button class="primary" data-testid="run" :disabled="!startable || nodeTypesLoading || !!bindingDocument || savingRun" :title="`${counts.drafts} draft card(s) and ${counts.wires} draft wire(s)`" @click="startCards()">
             Run<span v-if="startable" class="count" data-testid="run-count">{{ counts.drafts + counts.wires }}</span>
           </button>
           <button data-testid="save-workflow" @click="saveWorkflow">Save workflow…</button>
@@ -264,9 +442,10 @@ onMounted(() => {
           <button data-testid="paste-workflow" title="Paste workflow as fresh drafts (Cmd/Ctrl+V)" @click="canvasView?.pasteClipboard()">Paste</button>
           <span class="hint">Nothing runs until you press Run.</span>
         </div>
+        <div v-if="activeDocument" class="canvas-help" data-testid="project-binding">{{ activeDocument.project ? `Folder: ${activeDocument.project}` : "Autosaved workflow · A folder is only needed before Run." }}</div>
         <div v-if="activeGraph" class="canvas-help">Drag empty canvas to select · Shift-click to add · Space+drag or middle-drag to pan · Wheel to pan · Ctrl+wheel to zoom · Cmd/Ctrl+A/C/V</div>
-        <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" :node-types="nodeTypes" @select="selected = $event" @rename="onRename" @delete-live="onDeleteLive" @delete-edge="onDeleteEdge" @document-changed="counts = $event" @selection-changed="selectionCount = $event" @problem="store.pushError($event)" />
-        <div v-else class="empty" data-testid="empty">{{ status === "open" ? "No open projects. Press + to open a folder." : "Connecting to graphcoded…" }}</div>
+        <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" :node-types="nodeTypes" :types-loading="nodeTypesLoading" @select="selected = $event" @rename="onRename" @delete-live="onDeleteLive" @delete-edge="onDeleteEdge" @document-changed="counts = $event" @selection-changed="selectionCount = $event" @problem="store.pushError($event)" />
+        <div v-else class="empty" data-testid="empty">{{ activeDocument?.project ? "Waiting for the bound project. Your workflow is saved." : active && documentID(active) ? "Loading workflow…" : "Press + for a blank workflow, or open a folder from Projects." }}</div>
       </section>
     </div>
     <footer class="status" data-testid="status">{{ status }}<span v-if="lastError" class="error"> · {{ lastError }}</span></footer>

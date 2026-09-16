@@ -516,7 +516,8 @@ test.describe("phase 2 surface", () => {
     await page.getByTestId("recent-project").nth(2).click();
     await expect(page.getByTestId("status")).toContainText(`no project at ${h.gamma}`);
     await page.getByTestId("recent-project").nth(1).click();
-    await expect.poll(() => receivedCommands(h, "openProject").length).toBe(2);
+    await expect.poll(() => receivedCommands(h, "openProject").length).toBe(1);
+    expect(receivedCommands(h, "openProject")[0]!.openProject.path).toBe(h.beta);
     await expect.poll(() => page.evaluate(() => window.__graphcode.active())).toBe(h.beta);
     await shot(page, "P2-15-projects-tab");
   });

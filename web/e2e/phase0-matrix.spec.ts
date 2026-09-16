@@ -34,7 +34,7 @@ test.describe("phase 0 surface", () => {
     h = await launch({ daemonUp: false });
     await page.goto(h.url);
     await expect(page.getByTestId("status")).toContainText("bridge:", { timeout: 15_000 });
-    await expect(page.getByTestId("empty")).toContainText("Connecting");
+    await expect(page.getByTestId("empty")).toContainText("Press + for a blank workflow");
     await shot(page, "P0-01-daemon-down");
   });
 
@@ -70,28 +70,30 @@ test.describe("phase 0 surface", () => {
     expect(await page.evaluate(() => window.__graphcode.active())).toBe(h.alpha);
     await page.getByTestId("tab-close").first().click();
     await expect(page.getByTestId("tab")).toHaveCount(0);
-    await expect(page.getByTestId("empty")).toContainText("No open projects");
+    await expect(page.getByTestId("empty")).toContainText("Press + for a blank workflow");
     await shot(page, "P0-04-all-closed");
   });
 
-  test("P0-05 plus opens a project by path", async ({ page }) => {
+  test("P0-05 Projects opens a project by path", async ({ page }) => {
     h = await launch();
     await openApp(page, h);
     await page.getByTestId("tab-close").nth(1).click();
     await expect(page.getByTestId("tab")).toHaveCount(1);
     page.once("dialog", (d) => d.accept(h.beta));
-    await page.getByTestId("tab-add").click();
+    await page.getByTestId("sidebar-tab-projects").click();
+    await page.getByTestId("open-project").click();
     await expect(page.getByTestId("tab")).toHaveCount(2);
     await expect.poll(() => receivedCommands(h, "openProject").length).toBe(1);
     await expect.poll(() => page.evaluate(() => window.__graphcode.active())).toBe(h.beta);
     await shot(page, "P0-05-opened-by-path");
   });
 
-  test("P0-06 plus with a path the daemon rejects shows its error", async ({ page }) => {
+  test("P0-06 opening a path the daemon rejects shows its error", async ({ page }) => {
     h = await launch();
     await openApp(page, h);
     page.once("dialog", (d) => d.accept("/nonexistent/project"));
-    await page.getByTestId("tab-add").click();
+    await page.getByTestId("sidebar-tab-projects").click();
+    await page.getByTestId("open-project").click();
     await expect(page.getByTestId("status")).toContainText("no project at /nonexistent/project");
     await expect(page.getByTestId("tab")).toHaveCount(2);
     await expect(page.getByTestId("tab-name").first()).toHaveAttribute("aria-current", "true");
@@ -135,6 +137,7 @@ test.describe("phase 0 surface", () => {
   test("P0-07 dragging a card persists its position across a reload", async ({ page }) => {
     h = await launch();
     await openApp(page, h);
+    await expect.poll(() => page.evaluate(([project, id]) => window.__graphcode.positions(project)?.[id], [h.alpha, ID.plan] as const)).toBeTruthy();
     await expect.poll(() => nodeCount(page, h.alpha)).toBe(9);
     const before = (await page.evaluate(([p, id]) => window.__graphcode.positions(p)![id]!.pos, [h.alpha, ID.plan] as const)) as [number, number];
     const from = await cardTitlePoint(page, h.alpha, ID.plan);
