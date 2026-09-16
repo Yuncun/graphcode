@@ -187,7 +187,12 @@ export async function startBridge(options: BridgeOptions): Promise<{ port: numbe
   boundPort = port;
   return {
     port,
-    close: () => new Promise((resolve) => { for (const c of wss.clients) c.terminate(); wss.close(); server.close(() => resolve()); }),
+    close: () => new Promise((resolve) => {
+      for (const c of wss.clients) c.terminate();
+      wss.close();
+      server.close(() => resolve());
+      server.closeAllConnections();
+    }),
   };
 }
 
