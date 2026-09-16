@@ -36,6 +36,7 @@ const nodeTypesLoading = ref(false);
 let nodeTypeLoads = 0;
 /** What Run would send: the canvas reports it after every change. */
 const counts = ref<DocumentCounts>({ drafts: 0, wires: 0 });
+const selectionCount = ref(0);
 const workflows = ref<WorkflowListing[]>([]);
 const workflowsLoading = ref(false);
 /** One per project with a Start in flight; an errorOccurred while any is armed reverts that project's starting cards. */
@@ -213,9 +214,7 @@ async function loadWorkflow(name: string) {
   if (!project || !adapter) return;
   try {
     const file = await getWorkflow(name);
-    const made = adapter.loadWorkflow(file);
-    const skipped = Object.keys(file.cards).length - made.length;
-    if (skipped) store.pushError(`${skipped} card${skipped === 1 ? "" : "s"} in "${name}" skipped: node type not loaded`);
+    adapter.loadWorkflow(file);
     canvasView.value?.touch(project);
   } catch (error) {
     store.pushError(problemText(error));
@@ -223,7 +222,7 @@ async function loadWorkflow(name: string) {
 }
 
 // A selected card belongs to the project it came from; a tab change clears it.
-watch(active, () => { selected.value = null; });
+watch(active, () => { selected.value = null; selectionCount.value = 0; });
 
 onMounted(() => {
   (window as unknown as { __graphcode: unknown }).__graphcode = {
@@ -260,9 +259,13 @@ onMounted(() => {
             Run<span v-if="startable" class="count" data-testid="run-count">{{ counts.drafts + counts.wires }}</span>
           </button>
           <button data-testid="save-workflow" @click="saveWorkflow">Save workflow…</button>
-          <span class="hint">Drop a node type to draft a card. Nothing runs until you press Run.</span>
+          <button data-testid="select-all" title="Select all cards (Cmd/Ctrl+A)" @click="canvasView?.selectAll()">Select all</button>
+          <button data-testid="copy-selection" :disabled="!selectionCount" :title="`Copy ${selectionCount} selected card(s) and their internal wires (Cmd/Ctrl+C)`" @click="canvasView?.copySelection()">Copy</button>
+          <button data-testid="paste-workflow" title="Paste workflow as fresh drafts (Cmd/Ctrl+V)" @click="canvasView?.pasteClipboard()">Paste</button>
+          <span class="hint">Nothing runs until you press Run.</span>
         </div>
-        <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" :node-types="nodeTypes" @select="selected = $event" @rename="onRename" @delete-live="onDeleteLive" @delete-edge="onDeleteEdge" @document-changed="counts = $event" @problem="store.pushError($event)" />
+        <div v-if="activeGraph" class="canvas-help">Drag empty canvas to select · Shift-click to add · Space+drag or middle-drag to pan · Wheel to pan · Ctrl+wheel to zoom · Cmd/Ctrl+A/C/V</div>
+        <GraphCanvas v-if="activeGraph" ref="canvasView" :graph="activeGraph" :node-types="nodeTypes" @select="selected = $event" @rename="onRename" @delete-live="onDeleteLive" @delete-edge="onDeleteEdge" @document-changed="counts = $event" @selection-changed="selectionCount = $event" @problem="store.pushError($event)" />
         <div v-else class="empty" data-testid="empty">{{ status === "open" ? "No open projects. Press + to open a folder." : "Connecting to graphcoded…" }}</div>
       </section>
     </div>
@@ -276,7 +279,8 @@ body { background: #17191d; color: #e8e6e1; font-family: -apple-system, "Helveti
 .shell { height: 100%; display: flex; flex-direction: column; }
 .body { flex: 1; display: flex; min-height: 0; }
 .center { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #1e2126; border-bottom: 1px solid #2f333a; }
+.toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 10px; background: #1e2126; border-bottom: 1px solid #2f333a; }
+.canvas-help { padding: 5px 10px; color: #a4a9b2; background: #1e2126; font-size: 12px; }
 .toolbar button { background: #23262c; color: inherit; border: 1px solid #2f333a; border-radius: 4px; padding: 5px 10px; font: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
 .toolbar button.primary { background: #2f6fcf; border-color: #2f6fcf; color: white; }
 .toolbar button:disabled { opacity: .5; cursor: default; }

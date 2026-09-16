@@ -2,7 +2,7 @@ import { LGraph, LiteGraph, type LinkId, type LLink } from "@comfyorg/litegraph"
 import type { LoopEdge, LoopGraph } from "../daemon/protocol.ts";
 import { newNodeID } from "../nodes/draft.ts";
 import { defByName, typeForLoop, type NodeTypeEntry } from "../nodes/registry.ts";
-import { emptyCanvasDoc, instantiate, loadOffset, workflowFile, type CanvasDoc, type CardRecord, type CardSnapshot, type EdgeRecord, type Placed, type WorkflowFile } from "./document.ts";
+import { emptyCanvasDoc, instantiate, loadOffset, readWorkflowFile, workflowFile, type CanvasDoc, type CardRecord, type CardSnapshot, type EdgeRecord, type Placed, type WorkflowFile } from "./document.ts";
 import { CARD_WIDTH, connectAsAdapter, LoopCardNode, registerLoopCardNode, type CardHost } from "./LoopCardNode.ts";
 import { placeNodes } from "./placement.ts";
 
@@ -208,9 +208,14 @@ export class GraphAdapter {
     return { drafts: { ...layout.drafts }, nodes, edges: [...layout.draftEdges] };
   }
 
-  /** A workflow file: every card with a type as a draft definition, and every wire, live or draft. */
-  workflow(name: string): WorkflowFile {
-    const cards: CardSnapshot[] = this.cards().filter((card) => card.def).map((card) => ({ id: String(card.id), record: card.record(), placed: card.placed() }));
+  /** Draft definitions and internal wires, for either the selected cards or every typed card. */
+  workflow(name: string, selectedIDs?: readonly string[]): WorkflowFile {
+    const selected = selectedIDs ? new Set(selectedIDs) : null;
+    const included = this.cards().filter((card) => selected ? selected.has(String(card.id)) : card.def);
+    for (const card of included) {
+      if (!card.def || !defByName(this.types, card.nodeType)) throw new Error(`node type for "${card.title || card.id}" is not loaded`);
+    }
+    const cards: CardSnapshot[] = included.map((card) => ({ id: String(card.id), record: card.record(), placed: card.placed() }));
     const live: EdgeRecord[] = [...this.linkByEdge.values()].map((link) => {
       const slot = this.card(String(link.origin_id))!.outputDefinition(link.origin_slot)!;
       return { from: String(link.origin_id), to: String(link.target_id), kind: slot.kind, condition: slot.condition };
@@ -218,9 +223,13 @@ export class GraphAdapter {
     return workflowFile(name, cards, [...this.draftEdges(), ...live]);
   }
 
-  /** Loads a workflow as drafts with fresh ids, one gap right of what is on the canvas. Returns the new ids in the file's order. */
-  loadWorkflow(file: WorkflowFile): string[] {
-    const offset = loadOffset(this.cards().map((card) => card.placed()), Object.values(file.cards), CARD_WIDTH);
+  /** Fresh draft ids in file order; defaults to one gap right of the canvas, or uses the supplied translation. */
+  loadWorkflow(file: WorkflowFile, offset?: [number, number]): string[] {
+    file = readWorkflowFile(file);
+    for (const card of Object.values(file.cards)) {
+      if (!defByName(this.types, card.type)) throw new Error(`node type ${card.type} is not loaded`);
+    }
+    offset ??= loadOffset(this.cards().map((card) => card.placed()), Object.values(file.cards), CARD_WIDTH);
     const { cards, edges } = instantiate(file, this.newID, offset);
     const made = new Map<string, LoopCardNode>();
     for (const c of cards) {

@@ -163,9 +163,9 @@ test.describe("phase 1 surface", () => {
       const before = (await page.evaluate(() => window.__graphcode.viewport()!.offset)) as [number, number];
       const empty = await emptyPoint(page);
       await page.mouse.move(empty.x, empty.y);
-      await page.mouse.down();
+      await page.mouse.down({ button: "middle" });
       await page.mouse.move(empty.x + 90, empty.y - 60, { steps: 8 });
-      await page.mouse.up();
+      await page.mouse.up({ button: "middle" });
       const panned = (await page.evaluate(() => window.__graphcode.viewport()!.offset)) as [number, number];
       expect(panned).not.toEqual(before);
       await page.getByTestId("tab-name").nth(1).click();

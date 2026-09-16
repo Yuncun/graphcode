@@ -175,7 +175,7 @@ is a later phase.
 | Surface | Behaviour |
 |---|---|
 | Project tabs | Open projects from the daemon. Closing a tab sends `closeProject`. The graph inside a tab is that project's live graph. |
-| Canvas | ComfyUI interactions: drag to pan, wheel to zoom, drag a slot to link, double-click for the search box, right-click for the litegraph context menu. Cards show title, state pill, live line, type and age, drawn by the node adapter from the daemon's node. Clicking a card selects it and opens its terminal tab. Right-click menus and the search box are off until their items send daemon commands (phase 1 ruling 2). |
+| Canvas | LiteGraph standard navigation: empty-canvas drag selects a rectangle; Shift-click adds selection; Space+drag or middle-drag pans; wheel pans and Ctrl+wheel zooms. Drag a slot to link. Cards show title, state pill, live line, type and age, drawn by the node adapter from the daemon's node. Clicking a card selects it; double-clicking its header edits its name. Right-click menus and the search box are off until their items send daemon commands (phase 1 ruling 2). |
 | Nodes tab | Tree of node types by category with search. Drag onto the canvas creates a node with default widget values; the inspector opens for the brief. Create is sent to the daemon only when the brief is confirmed, because a goal loop starts on creation (finding 19). Version 1 pack: agent/goal, agent/timed, agent/main, agent/turn, group/composite; project pack over user pack over built-in on the same name. Phase 2: the drop makes a draft card with its inputs on it (section 11). |
 | Workflows tab | Recent projects, open by path, and saved graphs (exported bundles). Phase 2: saved workflow files (section 11); recent projects move to a Projects tab. |
 | Templates tab | The kit's template files. Dragging one onto the canvas creates a node with the template's settings. Composite templates come in phase 2 through `importNodes`. |
@@ -258,6 +258,18 @@ conflates authoring with running.
   `~/.graphcode/workflows/<name>.json`. The Workflows tab lists those files and loads one onto the
   current project as drafts with fresh ids, one column to the right of what is there. Recent projects
   move to a Projects tab.
+- **Workflow selection and clipboard.** Empty-canvas dragging selects a rectangle using LiteGraph's
+  native selection, with additive gestures intact. The toolbar exposes Select all, Copy, and Paste;
+  Cmd/Ctrl+A/C/V provides the same actions while the canvas has focus. Copy places GraphCode workflow
+  JSON on the system clipboard: selected cards as draft definitions and only wires with both ends
+  selected. Paste uses fresh ids near the canvas pointer and selects the copies, preserving names,
+  values, sizes, relative arrangement, and exact wire kinds and conditions. It works across project
+  and browser tabs and with workflow text in other apps. Native node cloning remains disabled;
+  copying live cards never changes or starts the originals. Malformed JSON and unavailable node
+  types refuse the entire paste or workflow load before mutation. Permission failures are visible,
+  never replaced with a stale clipboard; an async paste is cancelled on a project-tab change.
+  Text fields retain normal selection and clipboard behavior. Visible instructions explain
+  rectangle selection, Space/middle-drag panning, wheel panning, and Ctrl+wheel zoom.
 
 Node type modules gain an optional `fromLoop(node)` returning widget values for a live loop. A live
 loop's type is the built-in for its `loopType` (goalBased → agent/goal, timeBased → agent/timed,

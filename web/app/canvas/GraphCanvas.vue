@@ -6,7 +6,7 @@ import type { LoopGraph } from "../daemon/protocol.ts";
 import type { NodeTypeEntry } from "../nodes/registry.ts";
 import { NODE_TYPE_MIME } from "../sidebar/library.ts";
 import { GraphAdapter } from "./adapter.ts";
-import type { CanvasDoc } from "./document.ts";
+import { readWorkflowFile, type CanvasDoc } from "./document.ts";
 import { FieldEditor } from "./FieldEditor.ts";
 import { getLayout, putLayout } from "./layoutClient.ts";
 import { linkRequestFrom, type DraggedLink, type LinkRequest } from "./linkRequest.ts";
@@ -44,6 +44,7 @@ const emit = defineEmits<{
   /** A live edge picked off its input: likewise. */
   deleteEdge: [edgeID: string];
   documentChanged: [counts: DocumentCounts];
+  selectionChanged: [count: number];
   problem: [message: string];
 }>();
 const hostEl = ref<HTMLDivElement | null>(null);
@@ -65,6 +66,7 @@ const saves = createSaveScheduler({ delayMs: SAVE_DELAY_MS, save });
 let shows = 0;
 /** The view whose graph the canvas is drawing. */
 let shown: ProjectView | null = null;
+let tabChanges = 0;
 
 /** What every card asks of the canvas. */
 const host: CardHost = {
@@ -101,6 +103,93 @@ function changed(): void {
   view.adapter.refreshInputLabels();
   saves.schedule(view.project);
   emit("documentChanged", counts(view));
+}
+
+function selectionIDs(): string[] {
+  return canvas ? [...canvas.selectedItems].filter((item): item is LoopCardNode => item instanceof LoopCardNode).map((card) => String(card.id)) : [];
+}
+
+function selectAll(): void {
+  canvas?.selectItems();
+  canvasEl.value?.focus();
+}
+
+function selectionText(): string {
+  const ids = selectionIDs();
+  if (!shown || !ids.length) throw new Error("Select cards to copy.");
+  if (props.graph.project.path !== shown.project) throw new Error("The active canvas changed. Copy again in the intended canvas.");
+  return JSON.stringify(shown.adapter.workflow("Selection", ids), null, 2);
+}
+
+function clipboardProblem(action: string, error: unknown): void {
+  emit("problem", `Could not ${action} workflow: ${error instanceof Error ? error.message : String(error)}`);
+}
+
+function onCanvasKey(event: KeyboardEvent): void {
+  if (event.target !== canvasEl.value || !(event.metaKey || event.ctrlKey) || event.altKey) return;
+  const key = event.key.toLowerCase();
+  if (!["a", "c", "v"].includes(key)) return;
+  // Native cloning cannot carry GraphCode definitions. Keep the browser default for ClipboardEvents.
+  event.stopImmediatePropagation();
+  if (key === "a") {
+    event.preventDefault();
+    selectAll();
+  }
+}
+
+function onCopy(event: ClipboardEvent): void {
+  if (event.target !== canvasEl.value) return;
+  event.preventDefault();
+  try {
+    if (!event.clipboardData) throw new Error("The browser did not provide clipboard access.");
+    event.clipboardData.setData("text/plain", selectionText());
+  } catch (error) { clipboardProblem("copy", error); }
+}
+
+function pasteText(text: string, view: ProjectView, at: [number, number]): void {
+  if (!canvas || shown !== view || props.graph.project.path !== view.project) throw new Error("The active canvas changed. Paste again in the intended canvas.");
+  const file = readWorkflowFile(JSON.parse(text));
+  const incoming = Object.values(file.cards);
+  if (!incoming.length) throw new Error("The workflow contains no cards.");
+  const offset: [number, number] = [
+    at[0] + 20 - Math.min(...incoming.map((card) => card.pos[0])),
+    at[1] + 20 - Math.min(...incoming.map((card) => card.pos[1])),
+  ];
+  const ids = view.adapter.loadWorkflow(file, offset);
+  canvas.selectItems(ids.map((id) => view.adapter.card(id)!));
+  canvasEl.value?.focus();
+  changed();
+}
+
+function onPaste(event: ClipboardEvent): void {
+  if (event.target !== canvasEl.value) return;
+  event.preventDefault();
+  try {
+    if (!shown || !canvas || !event.clipboardData) throw new Error("The canvas or clipboard is not ready.");
+    pasteText(event.clipboardData.getData("text/plain"), shown, [canvas.graph_mouse[0], canvas.graph_mouse[1]]);
+  } catch (error) { clipboardProblem("paste", error); }
+}
+
+async function copySelection(): Promise<void> {
+  try {
+    const text = selectionText();
+    if (!navigator.clipboard) throw new Error("Clipboard access is unavailable. Use Cmd/Ctrl+C on the canvas.");
+    canvasEl.value?.focus();
+    await navigator.clipboard.writeText(text);
+  } catch (error) { clipboardProblem("copy", error); }
+}
+
+async function pasteClipboard(): Promise<void> {
+  const view = shown;
+  const tab = tabChanges;
+  try {
+    if (!view || !canvas) throw new Error("The canvas is not ready.");
+    if (!navigator.clipboard) throw new Error("Clipboard access is unavailable. Use Cmd/Ctrl+V on the canvas.");
+    const at: [number, number] = [canvas.graph_mouse[0], canvas.graph_mouse[1]];
+    const text = await navigator.clipboard.readText();
+    if (tab !== tabChanges || props.graph.project.path !== view.project) throw new Error("The active canvas changed. Paste again in the intended canvas.");
+    pasteText(text, view, at);
+  } catch (error) { clipboardProblem("paste", error); }
 }
 
 async function show(graph: LoopGraph): Promise<void> {
@@ -199,6 +288,10 @@ onMounted(async () => {
   const element = canvasEl.value;
   const hostElement = hostEl.value;
   if (!element || !hostElement) return;
+  LiteGraph.canvasNavigationMode = "standard";
+  // LiteGraph gates wheel panning behind its trackpad options, even in standard navigation mode.
+  LiteGraph.macTrackpadGestures = true;
+  LiteGraph.macGesturesRequireMac = false;
   // The constructor starts litegraph's render loop; stopRendering() below pairs with it.
   canvas = new LGraphCanvas(element, view.adapter.lgraph);
   editor = new FieldEditor(hostElement);
@@ -220,6 +313,7 @@ onMounted(async () => {
   canvas.onSelectionChange = (selected) => {
     const ids = Object.keys(selected);
     emit("select", ids.length === 1 ? ids[0]! : null);
+    emit("selectionChanged", selectionIDs().length);
   };
   // The editor sits over its field. litegraph draws a frame whenever the canvas is dirty, and a pan
   // or zoom marks it dirty, so placing the editor again on every drawn frame keeps it on its field.
@@ -299,7 +393,10 @@ onMounted(async () => {
 watch(() => props.graph, (graph, previous) => {
   // A deep change to the same graph reports the same object as `previous`, so this only fires
   // when the tab really changed: save the project being left before its debounce runs out.
-  if (previous && previous.project.path !== graph.project.path) saves.flush(previous.project.path);
+  if (previous && previous.project.path !== graph.project.path) {
+    tabChanges++;
+    saves.flush(previous.project.path);
+  }
   void show(graph);
 }, { deep: true });
 
@@ -310,6 +407,9 @@ watch(() => props.nodeTypes, (types) => {
 });
 
 defineExpose({
+  selectAll,
+  copySelection,
+  pasteClipboard,
   /** App.vue closes a project that is not the one on screen without the watch above ever firing, so it calls this. */
   flushSave: (project: string) => saves.flush(project),
   positions: (project: string) => resolved.get(project)?.adapter.document().nodes,
@@ -335,6 +435,7 @@ defineExpose({
 });
 
 onBeforeUnmount(() => {
+  tabChanges++;
   window.removeEventListener("resize", fit);
   resizeObserver?.disconnect();
   onUserLinkDrop(null);
@@ -345,7 +446,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="hostEl" class="canvas-host" @dragover="onDragOver" @drop="onDrop"><canvas ref="canvasEl" tabindex="-1"></canvas></div>
+  <div ref="hostEl" class="canvas-host" @dragover="onDragOver" @drop="onDrop">
+    <canvas ref="canvasEl" tabindex="-1" @keydown.capture="onCanvasKey" @copy="onCopy" @paste="onPaste"></canvas>
+  </div>
 </template>
 
 <style scoped>

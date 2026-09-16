@@ -57,6 +57,15 @@ describe("readWorkflowFile", () => {
     expect(() => readWorkflowFile({ ...good, cards: { a: { type: "agent/goal" } } })).toThrow("card a is not well formed");
     expect(() => readWorkflowFile({ ...good, edges: [{ from: "a", to: "zzz", kind: "handoff", condition: "always" }] })).toThrow("edge 0 is not well formed");
   });
+
+  it("rejects malformed sizes, self wires, and inherited endpoint names", () => {
+    for (const size of ["large", [300, -20], [0, 20], [300, null]]) {
+      expect(() => readWorkflowFile({ ...good, cards: { ...good.cards, a: { ...good.cards.a, size } } })).toThrow(/card a/);
+    }
+    for (const to of ["a", "constructor", "__proto__"]) {
+      expect(() => readWorkflowFile({ ...good, edges: [{ from: "a", to, kind: "handoff", condition: "always" }] })).toThrow(/edge 0/);
+    }
+  });
 });
 
 describe("workflowFile", () => {
@@ -77,6 +86,16 @@ describe("workflowFile", () => {
 });
 
 describe("instantiate", () => {
+  it("keeps nested custom values independent between the source and repeated pastes", () => {
+    const file: WorkflowFile = { version: 1, name: "Custom", cards: {
+      a: { type: "custom/type", title: "", values: { options: { tags: ["original"] } }, pos: [0, 0] },
+    }, edges: [] };
+    const first = instantiate(file, () => "first", [0, 0]);
+    const second = instantiate(file, () => "second", [0, 0]);
+    (first.cards[0]!.record.values.options as { tags: string[] }).tags.push("edited");
+    expect(file.cards.a!.values.options).toEqual({ tags: ["original"] });
+    expect(second.cards[0]!.record.values.options).toEqual({ tags: ["original"] });
+  });
   it("mints fresh ids, rewires the edges to them, and shifts positions by the offset", () => {
     const file = workflowFile("pipe", [card("A", 10, 20, [300, 200]), card("B", 350, 20)], [{ from: "A", to: "B", kind: "spawn", condition: "always" }]);
     let n = 0;
