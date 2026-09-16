@@ -109,9 +109,26 @@ The Delete key removes a draft outright and asks before a live card is deleted. 
 its input removes a draft wire outright and asks before a live edge is deleted. litegraph's context
 menus and search box are off.
 
+Drag empty canvas to select a rectangle of cards. Shift-click adds to the selection; **Select all**
+or Cmd/Ctrl+A selects every card. Space+drag or middle-button drag pans; the wheel pans and
+Ctrl+wheel zooms. These gestures use LiteGraph's standard navigation mode.
+
 ## Workflows
+
+**Copy** or Cmd/Ctrl+C copies selected cards and only the wires between them as GraphCode workflow
+JSON on the system clipboard. **Paste** or Cmd/Ctrl+V inserts fresh draft cards near the last canvas
+pointer position and selects them. Names, custom values, sizes, relative positions, and exact wire
+kinds and conditions are preserved. Live cards are copied as draft definitions; originals are never
+started, renamed, or deleted. Copy/paste works between project tabs, browser tabs, and workflow JSON
+in a text editor. Text fields keep their normal text selection and clipboard shortcuts.
+
+The whole paste is refused if the JSON is malformed or a node type is unavailable. Browser clipboard
+permission errors appear in the footer, without falling back to an older copy. A pending toolbar
+paste is cancelled if the active project tab changes before the clipboard read completes.
 
 **Save workflow…** writes every card (live ones through the type's `fromLoop`) and every wire to
 `~/.graphcode/workflows/<name>.json`. The Workflows tab lists those files; clicking one loads it onto
-the current project as drafts with fresh ids, to the right of what is there. Recent projects are on
-the Projects tab.
+the current project as drafts with fresh ids, to the right of what is there. Like paste, loading
+refuses malformed files or unavailable node types before adding any cards. Recent projects are on
+the Projects tab. `e2e/clipboard-selection.spec.ts` covers selection, clipboard transfers, permissions,
+text-field isolation, and navigation against temporary projects and the scripted daemon.

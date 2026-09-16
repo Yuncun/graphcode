@@ -526,7 +526,9 @@ test.describe("phase 2 surface", () => {
     await openAlpha(page, h);
     const empty = await emptyPoint(page);
     await page.mouse.move(empty.x, empty.y);
+    await page.keyboard.down("Control");
     for (let i = 0; i < 6; i++) await page.mouse.wheel(0, 240);
+    await page.keyboard.up("Control");
     await expect.poll(() => page.evaluate(() => window.__graphcode.viewport()!.scale)).toBeLessThan(0.5);
     await shot(page, "P2-16-low-quality");
     expect(h.pageErrors).toEqual([]);
@@ -556,12 +558,12 @@ test.describe("phase 2 surface", () => {
     const editor = page.getByTestId("field-editor");
     await expect(editor).toBeVisible();
     const before = (await editor.boundingBox())!;
-    // Pan with the wheel while the editor is open (a drag would blur it): litegraph pans on shift+wheel? No: it zooms on wheel.
-    // Zoom out one step instead: the editor must shrink and move with its field.
+    // Wheel pan keeps the text editor open and aligned with its field.
     const empty = await emptyPoint(page);
     await page.mouse.move(empty.x, empty.y);
     await page.mouse.wheel(0, 120);
-    await expect.poll(async () => (await editor.boundingBox())!.width).toBeLessThan(before.width);
+    await expect.poll(async () => (await editor.boundingBox())!.y).toBeLessThan(before.y);
+    expect((await editor.boundingBox())!.width).toBeCloseTo(before.width, 0);
     const after = (await editor.boundingBox())!;
     const expected = await widgetPoint(page, h.alpha, id, "summary");
     expect(expected.x).toBeGreaterThan(after.x);

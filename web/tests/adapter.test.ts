@@ -335,4 +335,51 @@ describe("GraphAdapter: the user's side", () => {
     expect(again).not.toEqual(made);
     expect(a.card(again[0]!)!.pos[0]).toBeGreaterThan(720);
   });
+
+  it("copies only selected cards and internal wires, snapshotting live values without changing originals", () => {
+    const a = make();
+    a.sync(g([n("A", "Named"), n("B"), n("C")], [
+      ["A", "B", "message", "onSuccess"], ["A", "C", "spawn", "onFailure"],
+    ]), { ...layout(), nodes: { A: { pos: [10, 20], size: [360, 500] }, B: { pos: [410, 60] } } });
+    const before = a.document();
+    const file = a.workflow("Selection", ["A", "B"]);
+    expect(Object.keys(file.cards)).toEqual(["A", "B"]);
+    expect(file.cards.A).toMatchObject({ title: "Named", values: { summary: "goal A" }, pos: [10, 20], size: [360, 500] });
+    expect(file.edges).toEqual([{ from: "A", to: "B", kind: "message", condition: "onSuccess" }]);
+    const made = a.loadWorkflow(file, [100, 200]);
+    expect(made).toHaveLength(2);
+    expect(a.card(made[0]!)!.placed()).toEqual({ pos: [110, 220], size: [360, 500] });
+    expect(a.card(made[1]!)!.pos[0]).toBe(510);
+    expect(a.card(made[1]!)!.pos[1]).toBe(260);
+    expect(a.draftEdges()).toEqual([{ from: made[0], to: made[1], kind: "message", condition: "onSuccess" }]);
+    expect(a.card("A")!.cardMode).toBe("live");
+    expect(a.card("A")!.clonable).toBe(false);
+    expect(a.document().nodes.A).toEqual(before.nodes.A);
+    expect(a.card(made[0]!)!.cardMode).toBe("draft");
+    expect(a.workflow("Empty", []).cards).toEqual({});
+  });
+
+  it("refuses an unknown selected type rather than exporting a partial selection", () => {
+    const a = make();
+    a.types = [];
+    a.sync(g([n("A")], []), layout());
+    expect(() => a.workflow("Selection", ["A"])).toThrow(/type.*not loaded/i);
+  });
+
+  it("rejects unavailable types and malformed edges before adding any workflow cards", () => {
+    const a = make();
+    a.addDraft("agent/goal", [40, 40]);
+    const before = a.document();
+    const cards = {
+      a: { type: "agent/main", title: "Known", values: {}, pos: [0, 0] as [number, number] },
+      b: { type: "missing/type", title: "Missing", values: {}, pos: [400, 0] as [number, number] },
+    };
+    expect(() => a.loadWorkflow({ version: 1, name: "Selection", cards, edges: [] })).toThrow(/missing\/type.*not loaded/i);
+    expect(a.document()).toEqual(before);
+    cards.b.type = "agent/goal";
+    expect(() => a.loadWorkflow({ version: 1, name: "Selection", cards, edges: [
+      { from: "a", to: "absent", kind: "handoff", condition: "always" },
+    ] })).toThrow(/edge/);
+    expect(a.document()).toEqual(before);
+  });
 });

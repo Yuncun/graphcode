@@ -78,16 +78,16 @@ export function readWorkflowFile(raw: unknown): WorkflowFile {
   if (!isObject(raw) || raw.version !== 1 || typeof raw.name !== "string" || !isObject(raw.cards) || !Array.isArray(raw.edges)) {
     throw new Error("not a workflow file");
   }
-  const cards: WorkflowFile["cards"] = {};
-  for (const [id, card] of Object.entries(raw.cards)) {
+  const cards: WorkflowFile["cards"] = Object.fromEntries(Object.entries(raw.cards).map(([id, card]) => {
     const record = readRecord(card);
     const placed = readPlaced(card);
     if (!record || !placed) throw new Error(`card ${id} is not well formed`);
-    cards[id] = { ...record, ...placed };
-  }
+    if (isObject(card) && "size" in card && (!isPoint(card.size) || card.size.some((n) => n <= 0))) throw new Error(`card ${id} is not well formed`);
+    return [id, { ...record, ...placed }];
+  }));
   const edges = raw.edges.map((edge, i) => {
     const e = readEdge(edge);
-    if (!e || !(e.from in cards) || !(e.to in cards)) throw new Error(`edge ${i} is not well formed`);
+    if (!e || e.from === e.to || !Object.hasOwn(cards, e.from) || !Object.hasOwn(cards, e.to)) throw new Error(`edge ${i} is not well formed`);
     return e;
   });
   return { version: 1, name: raw.name, cards, edges };
@@ -109,7 +109,7 @@ export function instantiate(file: WorkflowFile, newID: () => string, offset: [nu
   const ids = new Map(Object.keys(file.cards).map((id) => [id, newID()]));
   const cards: CardSnapshot[] = Object.entries(file.cards).map(([id, c]) => ({
     id: ids.get(id)!,
-    record: { type: c.type, title: c.title, values: { ...c.values } },
+    record: { type: c.type, title: c.title, values: structuredClone(c.values) },
     placed: { pos: [c.pos[0] + offset[0], c.pos[1] + offset[1]], ...(c.size ? { size: [c.size[0], c.size[1]] as [number, number] } : {}) },
   }));
   const edges = file.edges.map((e) => ({ ...e, from: ids.get(e.from)!, to: ids.get(e.to)! }));
