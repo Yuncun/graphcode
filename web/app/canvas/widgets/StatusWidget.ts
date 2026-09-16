@@ -21,7 +21,9 @@ export class StatusWidget {
   private metaCache: TruncateCache | undefined;
 
   computeLayoutSize(): { minHeight: number; maxHeight: number; minWidth: number } {
-    return { minHeight: STATUS_HEIGHT, maxHeight: STATUS_HEIGHT, minWidth: 0 };
+    const lines = Number(Boolean(this.warning || this.live)) + Number(Boolean(this.meta));
+    const height = lines ? lines * 15 + 2 : 0;
+    return { minHeight: height, maxHeight: height, minWidth: 0 };
   }
 
   draw(ctx: CanvasRenderingContext2D, node: { size: ArrayLike<number> }, _width: number, y: number, _h: number, lowQuality = false): void {
@@ -33,10 +35,10 @@ export class StatusWidget {
     ctx.textBaseline = "top";
     ctx.fillStyle = this.warning ? "#f4b58f" : "#c8cbd0";
     this.firstCache = cachedTruncate(this.firstCache, ctx, this.warning || this.live, width);
-    ctx.fillText(this.firstCache.result, FIELD_MARGIN, y + 2);
+    if (this.warning || this.live) ctx.fillText(this.firstCache.result, FIELD_MARGIN, y + 2);
     ctx.fillStyle = "#8b909a";
     this.metaCache = cachedTruncate(this.metaCache, ctx, this.meta, width);
-    ctx.fillText(this.metaCache.result, FIELD_MARGIN, y + 17);
+    if (this.meta) ctx.fillText(this.metaCache.result, FIELD_MARGIN, y + (this.warning || this.live ? 17 : 2));
     ctx.restore();
   }
 }

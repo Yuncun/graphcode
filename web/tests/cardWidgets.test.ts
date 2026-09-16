@@ -63,10 +63,11 @@ describe("FieldWidget", () => {
 
 
 describe("StatusWidget", () => {
-  it("is a fixed two-line block that shows the warning in place of the live line", () => {
+  it("reserves space only for visible warning, activity and metadata lines", () => {
     const w = new StatusWidget();
-    expect(w.computeLayoutSize()).toEqual({ minHeight: STATUS_HEIGHT, maxHeight: STATUS_HEIGHT, minWidth: 0 });
+    expect(w.computeLayoutSize()).toEqual({ minHeight: 0, maxHeight: 0, minWidth: 0 });
     w.live = "editing src/app.ts"; w.meta = "Goal · 2h 0m";
+    expect(w.computeLayoutSize()).toEqual({ minHeight: STATUS_HEIGHT, maxHeight: STATUS_HEIGHT, minWidth: 0 });
     const { ctx, text } = fakeCtx();
     w.draw(ctx, node(), 300, 100, 20, false);
     expect(text).toEqual(["editing src/app.ts", "Goal · 2h 0m"]);

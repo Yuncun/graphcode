@@ -230,11 +230,16 @@ echoed it. Phase 2 flips that, the way ComfyUI works: the canvas is a document t
 and the daemon is an overlay on it. It is the proof of concept for the product finding that creation
 conflates authoring with running.
 
-- **Inputs on the card.** Each card shows a title field and its node type's widgets (goal or prompt,
+- **Inputs on the card.** Each card has an optional name edited by double-clicking its header, and
+  its node type's widgets (goal or prompt,
   done check, model, backend, …) drawn on the card by litegraph. A draft's are editable in place: text
   fields open the one shared editor over the field; combo, number and toggle are litegraph's own
   widgets. A live card's are read-only except the title, which sends `renameNode`. Cards drag and
   resize (a multiline field takes the room a resize gives); position and size are saved.
+  Clearing the name uses the node type's default. Draft status shows only actionable problems;
+  the header badge carries its state. Output ports follow the node definition, with connected
+  saved ports preserved. Incoming dots identify their source; every incoming handoff is required.
+  One output supports multiple destinations, but a newly drawn exact duplicate is refused.
 - **Drafts.** Dropping a node type makes a draft card at once; nothing is sent. Draft wires are drawn
   from any card's output onto any card and kept locally. Drafts and draft wires live in canvas.json
   (version 2) so a reload keeps them.

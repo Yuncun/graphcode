@@ -3,7 +3,7 @@ import type { LoopEdge, LoopGraph } from "../daemon/protocol.ts";
 import { newNodeID } from "../nodes/draft.ts";
 import { defByName, typeForLoop, type NodeTypeEntry } from "../nodes/registry.ts";
 import { emptyCanvasDoc, instantiate, loadOffset, workflowFile, type CanvasDoc, type CardRecord, type CardSnapshot, type EdgeRecord, type Placed, type WorkflowFile } from "./document.ts";
-import { CARD_WIDTH, connectAsAdapter, LoopCardNode, OUTPUT_SLOTS, outputSlotFor, registerLoopCardNode, type CardHost } from "./LoopCardNode.ts";
+import { CARD_WIDTH, connectAsAdapter, LoopCardNode, registerLoopCardNode, type CardHost } from "./LoopCardNode.ts";
 import { placeNodes } from "./placement.ts";
 
 const conditionColor: Record<string, string> = { always: "#cfd3d8", onSuccess: "#22c55e", onFailure: "#ef4444" };
@@ -104,7 +104,7 @@ export class GraphAdapter {
         || !this.lgraph.links.get(link.id)
         || link.origin_id !== edge.from
         || link.target_id !== edge.to
-        || link.origin_slot !== outputSlotFor(edge.kind, edge.condition);
+        || link.origin_slot !== this.card(edge.from)?.outputSlot(edge.kind, edge.condition);
       if (stale) {
         if (this.lgraph.links.get(link.id)) this.lgraph.removeLink(link.id);
         this.linkByEdge.delete(edgeID);
@@ -116,11 +116,12 @@ export class GraphAdapter {
       const to = this.card(edge.to);
       if (!from || !to) continue;
       const index = to.addEdgeInput(edge.kind);
-      const link = connectAsAdapter(() => from.connect(outputSlotFor(edge.kind, edge.condition), to, index));
+      const link = connectAsAdapter(() => from.connect(from.outputSlot(edge.kind, edge.condition), to, index));
       if (!link) { to.removeEdgeInput(index); continue; }
       this.linkByEdge.set(edge.id, link);
     }
     this.adoptUnknownLinks();
+    this.refreshInputLabels();
     // Colour follows the edge's condition every sync, not just at creation, so an edge whose
     // condition changes under a stable id (no retarget) still gets repainted.
     for (const [edgeID, link] of this.linkByEdge) link.color = conditionColor[wantedEdges.get(edgeID)!.condition] ?? conditionColor.always;
@@ -139,9 +140,10 @@ export class GraphAdapter {
   }
 
   /** A draft wire from `from`'s output `slot` to a new input on `to`. Null for a card wired to itself or a slot that does not exist. */
-  addDraftLink(from: LoopCardNode, slot: number, to: LoopCardNode): LLink | null {
-    const def = OUTPUT_SLOTS[slot];
+  addDraftLink(from: LoopCardNode, slot: number, to: LoopCardNode, preserve = false): LLink | null {
+    const def = from.outputDefinition(slot);
     if (!def || from === to) return null;
+    if (!preserve && from.hasOutputLinkTo(to, slot)) return null;
     const index = to.addEdgeInput(def.kind);
     const link = connectAsAdapter(() => from.connect(slot, to, index));
     if (!link) {
@@ -150,6 +152,7 @@ export class GraphAdapter {
     }
     link.color = DRAFT_LINK_COLOR;
     this.draftLinks.set(link.id, { from: String(from.id), to: String(to.id), kind: def.kind, condition: def.condition });
+    this.labelInput(link);
     to.fitHeight();
     return link;
   }
@@ -209,7 +212,7 @@ export class GraphAdapter {
   workflow(name: string): WorkflowFile {
     const cards: CardSnapshot[] = this.cards().filter((card) => card.def).map((card) => ({ id: String(card.id), record: card.record(), placed: card.placed() }));
     const live: EdgeRecord[] = [...this.linkByEdge.values()].map((link) => {
-      const slot = OUTPUT_SLOTS[link.origin_slot] ?? OUTPUT_SLOTS[0]!;
+      const slot = this.card(String(link.origin_id))!.outputDefinition(link.origin_slot)!;
       return { from: String(link.origin_id), to: String(link.target_id), kind: slot.kind, condition: slot.condition };
     });
     return workflowFile(name, cards, [...this.draftEdges(), ...live]);
@@ -227,7 +230,7 @@ export class GraphAdapter {
     for (const edge of edges) {
       const from = made.get(edge.from);
       const to = made.get(edge.to);
-      if (from && to) this.addDraftLink(from, outputSlotFor(edge.kind, edge.condition), to);
+      if (from && to) this.addDraftLink(from, from.outputSlot(edge.kind, edge.condition), to, true);
     }
     return [...made.keys()];
   }
@@ -257,13 +260,30 @@ export class GraphAdapter {
     this.draftLinks.delete(linkID);
   }
 
+  refreshInputLabels(): void {
+    for (const link of this.lgraph.links.values()) this.labelInput(link);
+  }
+
+  private labelInput(link: LLink): void {
+    const from = this.card(String(link.origin_id));
+    const to = this.card(String(link.target_id));
+    const spec = from?.outputDefinition(link.origin_slot);
+    const input = to?.inputs[link.target_slot];
+    if (!from || !spec || !input) return;
+    const source = from.getTitle();
+    const limit = spec.condition === "always" ? 24 : 12;
+    const name = source.length > limit ? `${source.slice(0, limit - 3)}...` : source;
+    const outcome = spec.condition === "onSuccess" ? " succeeds" : spec.condition === "onFailure" ? " fails" : "";
+    input.label = spec.kind === "handoff" ? `After ${name}${outcome}` : `${spec.kind === "message" ? "From" : "Copy for"} ${name}${outcome}`;
+  }
+
   /** Anything on the graph that is neither a live link nor a known draft is the user's: adopt it, or drop it if it makes no sense. */
   private adoptUnknownLinks(): void {
     const live = new Set([...this.linkByEdge.values()].map((link) => link.id));
     for (const [linkID, link] of [...this.lgraph.links]) {
       if (live.has(linkID) || this.draftLinks.has(linkID)) continue;
-      const slot = OUTPUT_SLOTS[link.origin_slot];
       const from = this.card(String(link.origin_id));
+      const slot = from?.outputDefinition(link.origin_slot);
       const to = this.card(String(link.target_id));
       if (!slot || !from || !to || from === to) {
         this.lgraph.removeLink(linkID);
@@ -287,7 +307,7 @@ export class GraphAdapter {
     for (const edge of layout.draftEdges) {
       const from = this.card(edge.from);
       const to = this.card(edge.to);
-      if (from && to) this.addDraftLink(from, outputSlotFor(edge.kind, edge.condition), to);
+      if (from && to) this.addDraftLink(from, from.outputSlot(edge.kind, edge.condition), to, true);
       else if (edge.from in this.orphans.drafts || edge.to in this.orphans.drafts) this.orphans.edges.push(edge);
     }
   }

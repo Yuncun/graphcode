@@ -10,7 +10,7 @@ import type { CanvasDoc } from "./document.ts";
 import { FieldEditor } from "./FieldEditor.ts";
 import { getLayout, putLayout } from "./layoutClient.ts";
 import { linkRequestFrom, type DraggedLink, type LinkRequest } from "./linkRequest.ts";
-import { LoopCardNode, onUserLinkDrop, outputSlotFor, type CardHost } from "./LoopCardNode.ts";
+import { LoopCardNode, onUserLinkDrop, TITLE_FIELD, type CardHost } from "./LoopCardNode.ts";
 import { createSaveScheduler } from "./saveScheduler.ts";
 import { applyViewport, fitToNodes, readViewport, type Viewport } from "./viewport.ts";
 import { FieldWidget } from "./widgets/FieldWidget.ts";
@@ -98,6 +98,7 @@ function counts(view: ProjectView): DocumentCounts {
 function changed(): void {
   const view = shown;
   if (!view) return;
+  view.adapter.refreshInputLabels();
   saves.schedule(view.project);
   emit("documentChanged", counts(view));
 }
@@ -168,7 +169,8 @@ function draftLink(request: LinkRequest): void {
   const from = view.adapter.card(request.from);
   const to = view.adapter.card(request.to);
   if (!from || !to) return;
-  if (view.adapter.addDraftLink(from, outputSlotFor(request.kind, request.condition), to)) changed();
+  if (view.adapter.addDraftLink(from, from.outputSlot(request.kind, request.condition), to)) changed();
+  else emit("problem", "That connection already exists or its ports cannot be connected.");
 }
 
 function fit(): void {
@@ -257,7 +259,10 @@ onMounted(async () => {
     const from = view.adapter.card(request.from);
     const to = view.adapter.card(request.to);
     if (!from || !to) return;
-    if (!view.adapter.addDraftLink(from, outputSlotFor(request.kind, request.condition), to)) return;
+    if (!view.adapter.addDraftLink(from, from.outputSlot(request.kind, request.condition), to)) {
+      emit("problem", "That connection already exists or its ports cannot be connected.");
+      return;
+    }
     // A wire being moved off an input still holds its old link: litegraph only lets go of it inside
     // the drop code that preventDefault skipped. Now that the new wire is drawn, let go of the old
     // one (a no-op for a wire dragged fresh from an output), or a move would duplicate the wire.
@@ -321,7 +326,7 @@ defineExpose({
   widgetBox: (project: string, id: string, name: string): [number, number, number, number] | null => {
     forceLayout();
     const card = resolved.get(project)?.adapter.card(id);
-    const widget = card?.widgets?.find((w) => w.name === name);
+    const widget = name === TITLE_FIELD ? card?.titleEditor : card?.widgets?.find((w) => w.name === name);
     if (!card || !widget) return null;
     if (widget instanceof FieldWidget) return widget.boxRect(card);
     const y = widget.last_y ?? widget.y;

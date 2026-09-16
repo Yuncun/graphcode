@@ -5,6 +5,9 @@ import { defByName, loadNodeTypes, TYPE_FOR_LOOP_TYPE, typeForLoop, validateNode
 const good = { default: { title: "Goal loop", category: "agent", description: "d", widgets: [{ name: "summary", type: "text", required: true }], toDraft: () => ({ loopType: "goalBased" }) } };
 
 describe("validateNodeType", () => {
+  it("rejects unknown edge conditions rather than changing the meaning of a port", () => {
+    expect(() => validateNodeType("agent/goal", { default: { ...good.default, outputs: [{ name: "done", type: "handoff", condition: "sometimes" }] } })).toThrow('outputs[0] has unknown condition "sometimes"');
+  });
   it("accepts a well-formed module and fills the optional fields", () => {
     const def = validateNodeType("agent/goal", good);
     expect(def.type).toBe("agent/goal");

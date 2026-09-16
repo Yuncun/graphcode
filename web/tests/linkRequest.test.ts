@@ -2,8 +2,9 @@
 import { describe, expect, it } from "vitest";
 import type { LGraphNode } from "@comfyorg/litegraph";
 import { linkRequestFrom } from "../app/canvas/linkRequest.ts";
+import { LoopCardNode } from "../app/canvas/LoopCardNode.ts";
 
-const node = (id: string) => ({ id }) as unknown as LGraphNode;
+const node = (id: string) => { const card = new LoopCardNode(); card.id = id; return card; };
 const drag = (from: LGraphNode, fromSlotIndex: number, toType = "input") => ({ node: from, fromSlotIndex, toType });
 
 describe("linkRequestFrom", () => {
