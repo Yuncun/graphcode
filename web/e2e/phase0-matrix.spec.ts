@@ -34,7 +34,7 @@ test.describe("phase 0 surface", () => {
     h = await launch({ daemonUp: false });
     await page.goto(h.url);
     await expect(page.getByTestId("status")).toContainText("bridge:", { timeout: 15_000 });
-    await expect(page.getByTestId("empty")).toContainText("Press + for a blank workflow");
+    await expect(page.getByTestId("empty")).toBeVisible();
     await shot(page, "P0-01-daemon-down");
   });
 
@@ -70,7 +70,7 @@ test.describe("phase 0 surface", () => {
     expect(await page.evaluate(() => window.__graphcode.active())).toBe(h.alpha);
     await page.getByTestId("tab-close").first().click();
     await expect(page.getByTestId("tab")).toHaveCount(0);
-    await expect(page.getByTestId("empty")).toContainText("Press + for a blank workflow");
+    await expect(page.getByTestId("empty")).toBeVisible();
     await shot(page, "P0-04-all-closed");
   });
 

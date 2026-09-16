@@ -13,12 +13,11 @@ function openFolder() {
   <div class="projects-panel">
     <button class="recent" data-testid="open-project" @click="openFolder">Open folder…</button>
     <h3>Recent projects</h3>
-    <p class="hint">The web canvas supports local folders. Use the Mac app for remote projects.</p>
-    <button v-for="p in recent" :key="p.path" class="recent" data-testid="recent-project" :title="p.path" :disabled="!isLocalProjectPath(p.path)" @click="emit('open', p.path)">
+    <button v-for="p in recent" :key="p.path" class="recent" data-testid="recent-project" :title="isLocalProjectPath(p.path) ? p.path : `${p.path}\nOpen remote projects in the Mac app`" :disabled="!isLocalProjectPath(p.path)" @click="emit('open', p.path)">
       <span class="title">{{ p.name }}</span>
       <small>{{ p.path }}</small>
     </button>
-    <p v-if="!recent.length" class="hint">The daemon has no recent projects. Open a folder here, or use + for a folder-free workflow.</p>
+    <p v-if="!recent.length" class="hint">No recent projects</p>
   </div>
 </template>
 

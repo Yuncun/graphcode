@@ -45,6 +45,8 @@ test("plus opens an autosaved workflow without a folder; reload and close preser
   page.on("dialog", (dialog) => { dialogs.push(dialog.message()); void dialog.dismiss(); });
   const key = await newWorkflow(page);
   expect(dialogs).toEqual([]);
+  await expect(page.getByTestId("toolbar").getByRole("button")).toHaveCount(2);
+  await expect(page.locator(".center .canvas-help")).toHaveCount(0);
   await draftGoal(page, key);
   await page.reload();
   await expect.poll(() => page.evaluate(() => window.__graphcode.active())).toBe(key);
@@ -55,6 +57,7 @@ test("plus opens an autosaved workflow without a folder; reload and close preser
   expect((await page.request.get(`${h.url}/api/documents/file?id=${key.slice(9)}`)).status()).toBe(200);
   await page.getByTestId("sidebar-tab-workflows").click();
   await page.locator(`[data-testid="document-item"][data-id="${key.slice(9)}"]`).click();
+  await expect(page.getByTestId("document-item").locator("small")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__graphcode.active())).toBe(key);
   await expect.poll(() => page.evaluate((p) => window.__graphcode.cards(p)?.[0]?.values.summary, key)).toBe("Review the proposed change");
   expect(receivedGraphCommands(h, "createNode")).toEqual([]);
@@ -79,7 +82,7 @@ export default { ...base, title: "Folder goal", toDraft(values) {
   fs.symlinkSync(h.alpha, alias);
   page.once("dialog", (dialog) => dialog.accept(`${alias}/`));
   await page.getByTestId("run").click();
-  await expect(page.getByTestId("project-binding")).toContainText(h.alpha);
+  await expect.poll(() => page.getByTestId("run").getAttribute("title")).toContain(h.alpha);
   expect(receivedGraphCommands(h, "createNode")).toEqual([]);
   await expect.poll(() => page.evaluate((p) => window.__graphcode.cards(p)?.length, key)).toBe(1);
   await page.getByTestId("run").click();
@@ -101,12 +104,14 @@ test("workflows copy across folder-free tabs and keep their renamed identity", a
   await openApp(page, h);
   const first = await newWorkflow(page);
   await draftGoal(page, first);
-  await page.getByTestId("select-all").click();
-  await page.getByTestId("copy-selection").click();
+  await page.locator("canvas").focus();
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.press("Meta+c");
   await expect.poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).includes("Review the proposed change"))).toBe(true);
   const second = await newWorkflow(page);
   await expect.poll(() => page.evaluate((key) => window.__graphcode.cards(key)?.length, second)).toBe(0);
-  await page.getByTestId("paste-workflow").click();
+  await page.locator("canvas").focus();
+  await page.keyboard.press("Meta+v");
   await expect.poll(() => page.evaluate((key) => window.__graphcode.cards(key)?.length, second)).toBe(1);
   const ids = await page.evaluate(([a, b]) => [window.__graphcode.cards(a)![0]!.id, window.__graphcode.cards(b)![0]!.id], [first, second] as const);
   expect(ids[0]).not.toBe(ids[1]);

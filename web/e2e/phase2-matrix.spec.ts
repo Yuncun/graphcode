@@ -550,7 +550,7 @@ test.describe("phase 2 surface", () => {
     expect(h.pageErrors).toEqual([]);
   });
 
-  test("P2-18 the editor follows the canvas when it pans", async ({ page }) => {
+  test("P2-18 the editor follows the canvas when it zooms", async ({ page }) => {
     h = await launch();
     await openAlpha(page, h);
     const id = await dropType(page, "agent/goal", await emptyPoint(page));
@@ -559,12 +559,12 @@ test.describe("phase 2 surface", () => {
     const editor = page.getByTestId("field-editor");
     await expect(editor).toBeVisible();
     const before = (await editor.boundingBox())!;
-    // Wheel pan keeps the text editor open and aligned with its field.
+    // Wheel zoom keeps the text editor open and aligned with its field.
     const empty = await emptyPoint(page);
     await page.mouse.move(empty.x, empty.y);
     await page.mouse.wheel(0, 120);
     await expect.poll(async () => (await editor.boundingBox())!.y).toBeLessThan(before.y);
-    expect((await editor.boundingBox())!.width).toBeCloseTo(before.width, 0);
+    expect((await editor.boundingBox())!.width).toBeLessThan(before.width);
     const after = (await editor.boundingBox())!;
     const expected = await widgetPoint(page, h.alpha, id, "summary");
     expect(expected.x).toBeGreaterThan(after.x);

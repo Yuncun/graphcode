@@ -76,17 +76,17 @@ test.describe("workflow clipboard and selection", () => {
   });
   test.afterEach(async () => { await h?.close(); });
 
-  test("rectangle selects only enclosed cards; OS clipboard copies internal wires across canvas and browser tabs", async ({ page, context }) => {
+  test("Cmd-drag rectangle selects only enclosed cards; OS clipboard copies internal wires across canvas and browser tabs", async ({ page, context }) => {
     const start = await point(page, 40, 10);
     const end = await point(page, 750, 540);
     const viewport = await page.evaluate(() => window.__graphcode.viewport());
     const originals = await cards(page, h.beta);
-    await expect(page.getByTestId("copy-selection")).toBeDisabled();
+    await page.keyboard.down("Meta");
     await page.mouse.move(start.x, start.y);
     await page.mouse.down();
     await page.mouse.move(end.x, end.y, { steps: 15 });
     await page.mouse.up();
-    await expect(page.getByTestId("copy-selection")).toBeEnabled();
+    await page.keyboard.up("Meta");
     expect(await page.evaluate(() => window.__graphcode.viewport())).toEqual(viewport);
     await page.keyboard.press("Meta+c");
     const file = await clipboard(page);
@@ -118,7 +118,8 @@ test.describe("workflow clipboard and selection", () => {
       await expect(other.getByTestId("node-type")).toHaveCount(5);
       await other.getByTestId("tab-name").nth(1).click();
       await expect.poll(() => cards(other, h.beta).then((c) => c.length)).toBe(3);
-      await other.getByTestId("paste-workflow").click();
+      await other.locator("canvas").focus();
+      await other.keyboard.press("Meta+v");
       await expect.poll(() => cards(other, h.beta).then((c) => c.length)).toBe(5);
       const fresh = (await cards(other, h.beta)).filter((c) => c.mode === "draft" && c.id !== "outside");
       expect(fresh.every((c) => !pasted.some((p) => p.id === c.id))).toBe(true);
@@ -130,7 +131,7 @@ test.describe("workflow clipboard and selection", () => {
     expect(h.pageErrors).toEqual([]);
   });
 
-  test("Cmd/Ctrl+A and toolbar select all copy the whole workflow; Shift-click stays additive", async ({ page }) => {
+  test("Cmd/Ctrl+A copies the whole workflow; Shift-click stays additive", async ({ page }) => {
     for (const modifier of ["Meta", "Control"]) {
       await page.locator("canvas").focus();
       await page.keyboard.press(`${modifier}+a`);
@@ -140,7 +141,6 @@ test.describe("workflow clipboard and selection", () => {
     }
     const empty = await point(page, 40, 10);
     await page.mouse.click(empty.x, empty.y);
-    await expect(page.getByTestId("copy-selection")).toBeDisabled();
     const first = await point(page, 100, 45);
     const second = await point(page, 460, 45);
     await page.mouse.click(first.x, first.y);
@@ -148,14 +148,15 @@ test.describe("workflow clipboard and selection", () => {
     await page.mouse.click(second.x, second.y);
     await page.keyboard.up("Shift");
     expect(Object.keys((await copyEvent(page)).cards).sort()).toEqual([ID.betaOne, ID.betaTwo]);
-    await page.getByTestId("select-all").click();
-    await page.getByTestId("copy-selection").click();
+    await page.keyboard.press("Meta+a");
+    await page.keyboard.press("Meta+c");
     expect(Object.keys((await clipboard(page)).cards)).toHaveLength(3);
     expect(receivedCommands(h, "graphCommand")).toEqual([]);
   });
 
   test("Cmd/Ctrl+C/V leave browser clipboard events enabled and never use native node cloning", async ({ page }) => {
-    await page.getByTestId("select-all").click();
+    await page.locator("canvas").focus();
+    await page.keyboard.press("Meta+a");
     const before = await doc(page, h.beta);
     for (const modifier of ["ctrlKey", "metaKey"]) {
       for (const [key, keyCode] of [["c", 67], ["v", 86]] as const) {
@@ -251,31 +252,6 @@ test.describe("workflow clipboard and selection", () => {
     expect(receivedCommands(h, "graphCommand")).toEqual([]);
   });
 
-  test("a clipboard read completing after a tab switch cannot paste into either canvas", async ({ page }) => {
-    await page.evaluate((text) => navigator.clipboard.writeText(text), JSON.stringify(workflow));
-    const before = await doc(page, h.beta);
-    await page.evaluate(() => {
-      const read = navigator.clipboard.readText.bind(navigator.clipboard);
-      navigator.clipboard.readText = async () => {
-        const text = await read();
-        document.body.dataset.clipboardPending = "true";
-        await new Promise<void>((resolve) => document.addEventListener("release-clipboard", () => resolve(), { once: true }));
-        navigator.clipboard.readText = read;
-        return text;
-      };
-    });
-    await page.getByTestId("paste-workflow").click();
-    await expect(page.locator("body")).toHaveAttribute("data-clipboard-pending", "true");
-    await page.getByTestId("tab-name").nth(0).click();
-    await expect.poll(() => cards(page, h.alpha).then((c) => c.length)).toBe(9);
-    const alpha = await doc(page, h.alpha);
-    await page.evaluate(() => document.dispatchEvent(new Event("release-clipboard")));
-    await expect(page.getByTestId("status")).toContainText("active canvas changed");
-    expect(await doc(page, h.alpha)).toEqual(alpha);
-    expect(await doc(page, h.beta)).toEqual(before);
-    expect(receivedCommands(h, "graphCommand")).toEqual([]);
-  });
-
   test("keyboard paste cannot change the previous canvas while another tab is loading", async ({ context }) => {
     const page = await context.newPage();
     await openApp(page, h);
@@ -301,49 +277,54 @@ test.describe("workflow clipboard and selection", () => {
     }
   });
 
-  test("clipboard permission denial reports an error without pasting a previous copy", async ({ page, context }) => {
-    await page.getByTestId("select-all").click();
-    await page.getByTestId("copy-selection").click();
-    expect(Object.keys((await clipboard(page)).cards)).toHaveLength(3);
-    const before = await doc(page, h.beta);
-    const cdp = await context.newCDPSession(page);
-    const { targetInfo } = await cdp.send("Target.getTargetInfo");
-    const browserContextId = targetInfo.browserContextId;
-    await cdp.send("Browser.setPermission", { permission: { name: "clipboard-read" }, setting: "denied", origin: h.url, browserContextId });
-    await page.getByTestId("paste-workflow").click();
-    await expect(page.getByTestId("status")).toContainText(/could not paste workflow.*denied/i);
-    expect(await doc(page, h.beta)).toEqual(before);
-    await cdp.send("Browser.setPermission", { permission: { name: "clipboard-write", allowWithoutSanitization: true }, setting: "denied", origin: h.url, browserContextId });
-    await cdp.send("Browser.setPermission", { permission: { name: "clipboard-write", allowWithoutSanitization: false }, setting: "denied", origin: h.url, browserContextId });
-    await page.getByTestId("copy-selection").click();
-    await expect(page.getByTestId("status")).toContainText(/could not copy workflow.*denied/i);
-    await cdp.detach();
+  test("Ctrl-drag rectangle selects cards without panning", async ({ page }) => {
+    const start = await point(page, 40, 10);
+    const end = await point(page, 750, 540);
+    const before = await page.evaluate(() => window.__graphcode.viewport());
+    await page.keyboard.down("Control");
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 15 });
+    await page.mouse.up();
+    await page.keyboard.up("Control");
+    expect(await page.evaluate(() => window.__graphcode.viewport())).toEqual(before);
+    expect(Object.keys((await copyEvent(page)).cards).sort()).toEqual([ID.betaOne, ID.betaTwo]);
     expect(receivedCommands(h, "graphCommand")).toEqual([]);
   });
 
-  test("Space-drag, middle-drag and wheel pan while Ctrl+wheel zooms", async ({ page }) => {
+  test("plain dragging pans without moving cards; Space and middle drag also pan, while the wheel zooms", async ({ page }) => {
     const at = await point(page, 40, 10);
     await page.locator("canvas").focus();
+    const originalCards = await cards(page, h.beta);
     const before = await page.evaluate(() => window.__graphcode.viewport()!);
-    await page.keyboard.down("Space");
     await page.mouse.move(at.x, at.y);
     await page.mouse.down();
     await page.mouse.move(at.x + 40, at.y + 40, { steps: 8 });
     await page.mouse.up();
+    const plain = await page.evaluate(() => window.__graphcode.viewport()!);
+    expect(plain.offset).not.toEqual(before.offset);
+    expect(plain.scale).toBe(before.scale);
+    expect(await cards(page, h.beta)).toEqual(originalCards);
+    await page.keyboard.down("Space");
+    await page.mouse.down();
+    await page.mouse.move(at.x + 60, at.y + 60, { steps: 8 });
+    await page.mouse.up();
     await page.keyboard.up("Space");
     const space = await page.evaluate(() => window.__graphcode.viewport()!);
-    expect(space.offset).not.toEqual(before.offset);
+    expect(space.offset).not.toEqual(plain.offset);
     await page.mouse.down({ button: "middle" });
     await page.mouse.move(at.x + 80, at.y + 80, { steps: 8 });
     await page.mouse.up({ button: "middle" });
     const middle = await page.evaluate(() => window.__graphcode.viewport()!.offset);
     expect(middle).not.toEqual(space.offset);
     await page.mouse.wheel(0, 100);
-    await expect.poll(() => page.evaluate(() => window.__graphcode.viewport()!.offset)).not.toEqual(middle);
-    expect(await page.evaluate(() => window.__graphcode.viewport()!.scale)).toBe(before.scale);
+    await expect.poll(() => page.evaluate(() => window.__graphcode.viewport()!.scale)).toBeLessThan(before.scale);
+    const zoom = await page.evaluate(() => window.__graphcode.viewport()!.scale);
     await page.keyboard.down("Control");
     await page.mouse.wheel(0, 120);
     await page.keyboard.up("Control");
-    await expect.poll(() => page.evaluate(() => window.__graphcode.viewport()!.scale)).toBeLessThan(before.scale);
+    await expect.poll(() => page.evaluate(() => window.__graphcode.viewport()!.scale)).toBeLessThan(zoom);
+    expect(await cards(page, h.beta)).toEqual(originalCards);
+    expect(receivedCommands(h, "graphCommand")).toEqual([]);
   });
 });

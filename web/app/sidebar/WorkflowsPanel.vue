@@ -9,21 +9,20 @@ const when = (ms: number) => new Date(ms).toLocaleString();
 <template>
   <div class="workflows-panel">
     <div class="toolbar">
-      <button class="primary" data-testid="workflow-save" :disabled="!canSave" @click="emit('save')">Save current canvas…</button>
+      <button class="primary" data-testid="workflow-save" :disabled="!canSave" @click="emit('save')">Save template…</button>
       <button data-testid="workflows-reload" title="Reload the list" :disabled="loading" @click="emit('reload')">↻</button>
     </div>
-    <h3>Autosaved workflows</h3>
-    <button v-for="doc in documents" :key="doc.id" class="workflow" data-testid="document-item" :data-id="doc.id" title="Reopen workflow" @click="emit('openDocument', doc.id)">
+    <h3>Workflows</h3>
+    <button v-for="doc in documents" :key="doc.id" class="workflow" data-testid="document-item" :data-id="doc.id" :title="doc.project ?? 'Reopen workflow'" @click="emit('openDocument', doc.id)">
       <span class="title">{{ doc.name }}</span>
-      <small>{{ doc.project ? "Folder attached" : "No folder needed" }}</small>
     </button>
-    <h3>Reusable templates</h3>
+    <h3>Templates</h3>
     <button v-for="w in workflows" :key="w.name" class="workflow" data-testid="workflow-item" :data-name="w.name" title="Load as fresh draft cards" @click="emit('load', w.name)">
       <span class="title">{{ w.name }}</span>
       <small>{{ when(w.savedAt) }}</small>
     </button>
     <p v-if="loading" class="hint">Loading…</p>
-    <p v-else-if="!workflows.length" class="hint">Save the current canvas to make a reusable template. It loads into any canvas as fresh drafts.</p>
+    <p v-else-if="!workflows.length" class="hint">No templates</p>
   </div>
 </template>
 
