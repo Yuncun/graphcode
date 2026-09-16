@@ -206,8 +206,24 @@ async function finishBinding(id: string, project: string) {
     await patchWorkflowDocument(id, { project });
     doc.project = project;
     await refreshDocuments();
-  } catch (error) { store.pushError(`folder could not be attached: ${problemText(error)}`); }
-  finally { if (bindingDocument.value?.id === id) bindingDocument.value = null; }
+  } catch (error) {
+    store.pushError(`folder could not be attached: ${problemText(error)}`);
+    return;
+  } finally { if (bindingDocument.value?.id === id) bindingDocument.value = null; }
+  // The Run that chose the folder continues here: the folder's own node packs are loaded first,
+  // since a project pack can change what a draft sends, and the canvas has re-read the drafts.
+  await untilTypesLoaded();
+  await nextTick();
+  if (active.value === key) await startCards();
+}
+
+/** Resolves once the node-type reload that a project change triggers has finished. */
+async function untilTypesLoaded(): Promise<void> {
+  await nextTick();
+  if (!nodeTypesLoading.value) return;
+  await new Promise<void>((resolve) => {
+    const stop = watch(nodeTypesLoading, (loading) => { if (!loading) { stop(); resolve(); } });
+  });
 }
 
 /** Drop the tab only once the daemon has been told, so the view cannot disagree with the daemon. */
@@ -272,7 +288,7 @@ async function startCards() {
   if (!plan.creates.length && !plan.edges.length) return;
   if (doc && !project) {
     if (status.value !== "open") { store.pushError("Connect to graphcoded before choosing a folder and running this workflow."); return; }
-    const folder = window.prompt("Choose an absolute project folder for this workflow. No agents start until you press Run again.")?.trim();
+    const folder = window.prompt("Project folder for this workflow (an absolute path). Run continues once the daemon has opened it.")?.trim();
     if (!folder) return;
     if (!isLocalProjectPath(folder)) { store.pushError("Choose an absolute local project folder."); return; }
     savingRun.value = true;

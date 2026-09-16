@@ -11,14 +11,6 @@ A browser UI for the GraphCode daemon, on ComfyUI's canvas library. Spec: `../CA
 The bridge talks to the daemon at `GRAPHCODE_SOCKET`, else `$GRAPHCODE_SUPPORT_DIR/graphcoded.sock`,
 else `~/.graphcode/graphcoded.sock`. To drive the fork's daemon: `GRAPHCODE_SUPPORT_DIR=~/.graphcode-fork pnpm serve`.
 
-With Node 26 and pnpm 11 already on PATH, mise is optional: run `pnpm install --frozen-lockfile`,
-`pnpm build`, and `pnpm serve` from `web/`.
-
-If a package mirror lacks versions in the lockfile, a local prototype can use
-`pnpm install --lockfile=false`, then `pnpm --config.lockfile=false build` and
-`node server/main.ts`. This resolves compatible versions without changing the committed lockfile;
-it is not a reproducible locked install. Do not commit mirror-specific download URLs.
-
 **+ creates a blank, autosaved workflow without choosing a folder.** Authoring and copy/paste work
 without the daemon. Open existing project canvases from **Projects → Open folder…** or Recent projects.
 Project folders are local only. Remote projects restored by the daemon stay open in the
@@ -124,11 +116,10 @@ The **+** tab button creates an independent document. Double-click its tab name 
 Closing a workflow tab finishes its pending save; it does not delete the document or stop agents.
 Reopen it in the **Workflows** sidebar. Existing project canvases remain available.
 
-For an unbound workflow, the first **Run** asks for a local folder and waits for the daemon to confirm
-it. Hover over Run to see the attached folder. Folder aliases and trailing slashes resolve to the
-daemon's canonical path. Review the folder's
-loaded node definitions, then press **Run** again to start. A folder's
-custom packs can change a draft's fields and behavior; unavailable types block execution.
+For a workflow with no folder yet, **Run** asks for a local folder, waits for the daemon to open it,
+loads that folder's node packs, and then runs. Hover over Run to see the attached folder. Folder
+aliases and trailing slashes resolve to the daemon's canonical path. A folder's custom packs can
+change a draft's fields and behavior; unavailable types block execution.
 The workflow saves its node identities before sending any commands and shows only its own agents,
 not unrelated agents in the same folder. A bound workflow waits for its project to be available;
 it does not turn unavailable running agents into new drafts.
